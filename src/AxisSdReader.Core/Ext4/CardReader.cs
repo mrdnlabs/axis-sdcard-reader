@@ -1,8 +1,8 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using DiscUtils;
 using DiscUtils.Ext;
-using DiscUtils.Raw;
 using DiscUtils.Streams;
+using RawDisk = DiscUtils.Raw.Disk;
 
 namespace AxisSdReader.Core.Ext4;
 
@@ -13,7 +13,7 @@ namespace AxisSdReader.Core.Ext4;
 public sealed record CardVolumeInfo(int PartitionIndex, long FirstByte, long LengthBytes);
 
 /// <summary>
-/// Opens an SD card — either a raw disk stream or an image file — and locates the ext4
+/// Opens an SD card - either a raw disk stream or an image file - and locates the ext4
 /// filesystem on it. Strictly read-only: the underlying DiscUtils ext implementation has
 /// no write paths, and callers are expected to supply read-only streams.
 /// </summary>
@@ -23,17 +23,17 @@ public sealed class CardReader : IDisposable
     private const int SuperblockOffset = 1024;
     private static readonly byte[] LuksMagic = [0x4C, 0x55, 0x4B, 0x53, 0xBA, 0xBE];
 
-    private readonly Disk _disk;
+    private readonly RawDisk _disk;
     private SparseStream? _partitionStream;
 
-    private CardReader(Disk disk, CardOpenStatus status, string? failureDetail)
+    private CardReader(RawDisk disk, CardOpenStatus status, string? failureDetail)
     {
         _disk = disk;
         Status = status;
         FailureDetail = failureDetail;
     }
 
-    private CardReader(Disk disk, ExtFileSystem fileSystem, SparseStream partitionStream, CardVolumeInfo volume)
+    private CardReader(RawDisk disk, ExtFileSystem fileSystem, SparseStream partitionStream, CardVolumeInfo volume)
     {
         _disk = disk;
         _partitionStream = partitionStream;
@@ -65,7 +65,7 @@ public sealed class CardReader : IDisposable
     /// </summary>
     public static CardReader Open(Stream diskStream, Ownership ownership)
     {
-        var disk = new Disk(diskStream, ownership);
+        var disk = new RawDisk(diskStream, ownership);
         try
         {
             return Open(disk);
@@ -77,7 +77,7 @@ public sealed class CardReader : IDisposable
         }
     }
 
-    private static CardReader Open(Disk disk)
+    private static CardReader Open(RawDisk disk)
     {
         var content = disk.Content;
 
