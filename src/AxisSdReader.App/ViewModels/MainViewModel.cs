@@ -221,6 +221,48 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    private async Task ExportSelectedRecording()
+    {
+        if (_card is null || SelectedRecording is not { } item)
+        {
+            return;
+        }
+
+        var dialog = new OpenFolderDialog { Title = "Choose export destination" };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var progress = new Progress<Core.Export.ExportProgress>(p =>
+            {
+                var pct = p.BytesTotal > 0 ? p.BytesDone * 100 / p.BytesTotal : 0;
+                BusyText = $"Exporting {p.CurrentFile}  ({p.FilesDone}/{p.FilesTotal} files, {pct}%)";
+            });
+
+            var fs = _card.FileSystem!;
+            var result = await _card.RunExclusive(() =>
+                Core.Export.RecordingExporter.Export(fs, item.Recording, dialog.FolderName, progress));
+
+            MessageBox.Show(
+                $"Exported {result.FilesExported} files ({result.BytesExported / (1024.0 * 1024):F0} MB) to:\n{result.TargetDirectory}",
+                "Export complete", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Export failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+            BusyText = "";
+        }
+    }
+
+    [RelayCommand]
     private void CloseCard()
     {
         Player.Stop();

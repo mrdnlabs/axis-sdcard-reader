@@ -140,6 +140,10 @@
                             <TextBlock Text="Speed:" VerticalAlignment="Center" Margin="12,0,4,0" />
                             <ComboBox Width="70" ItemsSource="{Binding Player.AvailableRates}"
                                       SelectedItem="{Binding Player.PlaybackRate}" />
+                            <Button Content="⬇ Export…" Command="{Binding ExportSelectedRecordingCommand}"
+                                    Margin="12,0,0,0"
+                                    IsEnabled="{Binding Player.HasRecording}"
+                                    ToolTip="Copy this recording's MKV files to a local folder" />
                         </StackPanel>
                         <TextBlock DockPanel.Dock="Right" Text="{Binding Player.PositionText}"
                                    HorizontalAlignment="Right" VerticalAlignment="Center" FontFamily="Consolas" />

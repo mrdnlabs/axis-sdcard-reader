@@ -23,13 +23,31 @@ This app:
 
 ## Status
 
-Work in progress.
+Feature-complete against card images; awaiting validation on real Axis cards.
 
 - [x] Phase 1 — ext4 reading (image-based) with tests
-- [ ] Phase 2 — raw device access + volume protection + CardProbe harness
-- [ ] Phase 3 — Axis recording model (sessions, MKV metadata)
-- [ ] Phase 4 — WPF UI: browse + play
-- [ ] Phase 5 — export, error paths, packaging
+- [x] Phase 2 — raw device access + volume protection + CardProbe harness
+- [x] Phase 3 — Axis recording model (sessions, MKV metadata)
+- [x] Phase 4 — WPF UI: browse + play (chunk-spanning timeline, speed control)
+- [x] Phase 5 — export with progress and verification
+- [ ] Validation against real Axis-written SD cards (`CardProbe --disk N`)
+- [ ] Installer/packaging
+
+## Trying it without hardware
+
+```
+dotnet run --project tools\CardProbe -- --image tests\fixtures\axis-card-v2.img
+dotnet build src\AxisSdReader.App -p:DevManifest=true && src\AxisSdReader.App\bin\Debug\net8.0-windows\AxisSdReader.App.exe tests\fixtures\axis-card-v2.img
+```
+
+(The fixture image is generated on first `dotnet test` run via WSL.)
+
+## Validating a real card
+
+1. Insert the SD card via the USB reader.
+2. From an **elevated** terminal: `dotnet run --project tools\CardProbe` to find the disk number,
+   then `dotnet run --project tools\CardProbe -- --disk N`.
+3. If the probe reports `Status: Ok` and lists recordings, run the app and open the card.
 
 ## Building
 
