@@ -12,7 +12,8 @@ public sealed class CardImageFixture
     public CardImageFixture()
     {
         var repoRoot = FindRepoRoot();
-        ImagePath = Path.Combine(repoRoot, "tests", "fixtures", "axis-card.img");
+        // Bump the version suffix whenever make-fixture.sh changes, to invalidate cached images.
+        ImagePath = Path.Combine(repoRoot, "tests", "fixtures", "axis-card-v2.img");
 
         if (!File.Exists(ImagePath))
         {
