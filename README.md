@@ -62,9 +62,25 @@ dotnet test
 The app itself requires administrator elevation at runtime (raw disk access on
 Windows is admin-only).
 
+## Export & FFmpeg
+
+Trimmed export (MP4 remux / MKV, cut to the marked in/out range) shells out to
+**FFmpeg** using stream copy (`-c copy`) — no re-encode, so it is fast and
+lossless. The app locates `ffmpeg.exe` in this order:
+
+1. an `ffmpeg` folder next to the app executable,
+2. next to the app executable directly,
+3. on the system `PATH`.
+
+For distribution, bundle an **LGPL** FFmpeg build in the `ffmpeg` folder. If
+FFmpeg is missing, the app disables trimmed export and says so. (MP4 keeps the
+original codec — H.264/H.265/AV1 — so very old players may still need a modern
+build; a true re-encode-to-H.264 path and timestamp burn-in are future work.)
+
 ## Key dependencies
 
 | Component | Library | License |
 |---|---|---|
 | ext4 (read-only) | [LTRData.DiscUtils](https://github.com/LTRData/DiscUtils) | MIT |
 | Video playback | [LibVLCSharp](https://code.videolan.org/videolan/LibVLCSharp) | LGPL 2.1 |
+| Trimmed export | [FFmpeg](https://ffmpeg.org) (`ffmpeg.exe`, external) | LGPL 2.1+ build |

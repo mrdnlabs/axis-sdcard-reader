@@ -90,6 +90,21 @@ public sealed class OpenCard : IDisposable
         }
     }
 
+    /// <summary>Runs an async card I/O operation with exclusive access held for its whole duration
+    /// (e.g. copy chunks off the card then run FFmpeg), so nothing else touches the shared stream.</summary>
+    public async Task<T> RunExclusiveAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
+    {
+        await _ioLock.WaitAsync(cancellationToken);
+        try
+        {
+            return await operation(cancellationToken);
+        }
+        finally
+        {
+            _ioLock.Release();
+        }
+    }
+
     public async Task<AxisCard> IndexAsync(Action<int>? progress = null)
     {
         var fs = FileSystem ?? throw new InvalidOperationException("No filesystem is open.");

@@ -992,7 +992,7 @@
                                                     BorderBrush="{DynamicResource T.Hair}" BorderThickness="1.5" Padding="13,11">
                                                 <StackPanel>
                                                     <TextBlock x:Name="T" Text="MP4" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource T.Text2}" />
-                                                    <TextBlock Text="H.264 · universal" FontSize="11" Foreground="{DynamicResource T.Muted2}" Margin="0,2,0,0" />
+                                                    <TextBlock Text="remux · plays widely" FontSize="11" Foreground="{DynamicResource T.Muted2}" Margin="0,2,0,0" />
                                                 </StackPanel>
                                             </Border>
                                             <ControlTemplate.Triggers>
@@ -1025,26 +1025,14 @@
                                         </ControlTemplate>
                                     </Button.Template>
                                 </Button>
-                                <Button Cursor="Hand" Command="{Binding SetExportFormatCommand}" CommandParameter="asf">
-                                    <Button.Template>
-                                        <ControlTemplate TargetType="Button">
-                                            <Border x:Name="B" CornerRadius="9" Background="{DynamicResource T.Subtle}"
-                                                    BorderBrush="{DynamicResource T.Hair}" BorderThickness="1.5" Padding="13,11">
-                                                <StackPanel>
-                                                    <TextBlock x:Name="T" Text="ASF" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource T.Text2}" />
-                                                    <TextBlock Text="Axis native" FontSize="11" Foreground="{DynamicResource T.Muted2}" Margin="0,2,0,0" />
-                                                </StackPanel>
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <DataTrigger Binding="{Binding ExportFormat}" Value="asf">
-                                                    <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentTint2}" />
-                                                    <Setter TargetName="B" Property="BorderBrush" Value="{DynamicResource T.Accent}" />
-                                                    <Setter TargetName="T" Property="Foreground" Value="{DynamicResource T.AccentInk}" />
-                                                </DataTrigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </Button.Template>
-                                </Button>
+                                <Border CornerRadius="9" Background="{DynamicResource T.Subtle}"
+                                        BorderBrush="{DynamicResource T.Hair}" BorderThickness="1.5" Padding="13,11" Opacity="0.5"
+                                        ToolTip="ASF is a legacy container with no modern-codec support — not offered.">
+                                    <StackPanel>
+                                        <TextBlock Text="ASF" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource T.Muted2}" />
+                                        <TextBlock Text="unavailable" FontSize="11" Foreground="{DynamicResource T.Muted3}" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </Border>
                             </UniformGrid>
 
                             <Button Command="{Binding ToggleStampCommand}" HorizontalAlignment="Left" Cursor="Hand">

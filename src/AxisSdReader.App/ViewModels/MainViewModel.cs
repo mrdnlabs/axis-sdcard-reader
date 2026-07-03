@@ -295,6 +295,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
             if (_cameras.Count > 0)
             {
+                SetBootStage("Preparing player…", 0.95, "starting video engine");
                 await LoadCameraIntoPlayer(_cameras[0]);
             }
 
@@ -659,6 +660,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ToggleStamp() => IncludeStamp = !IncludeStamp;
 
+    /// <summary>True when FFmpeg is available; MP4 export and trimming require it.</summary>
+    public bool FfmpegAvailable { get; } = Core.Export.FfmpegExporter.IsAvailable;
+
     [RelayCommand]
     private async Task DoExport()
     {
@@ -667,8 +671,43 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var recordings = Player.RecordingsInSelection();
-        if (recordings.Count == 0)
+        var container = ExportFormat switch
+        {
+            "mp4" => Core.Export.ExportContainer.Mp4,
+            "mkv" => Core.Export.ExportContainer.Mkv,
+            _ => (Core.Export.ExportContainer?)null,
+        };
+
+        if (container is null)
+        {
+            MessageBox.Show(
+                "ASF export isn't available. Choose MP4 (plays almost anywhere) or MKV (original streams).",
+                "Format not supported", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        if (!FfmpegAvailable)
+        {
+            MessageBox.Show(
+                "FFmpeg was not found, so trimmed export is unavailable. Install ffmpeg.exe (on the PATH " +
+                "or in an 'ffmpeg' folder next to the app) and try again.",
+                "FFmpeg required", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        BusyText = "Preparing export…";
+        IsBusy = true;
+        IReadOnlyList<ExportSlice> slices;
+        try
+        {
+            slices = await Player.BuildExportSlices();
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+
+        if (slices.Count == 0)
         {
             MessageBox.Show("The selected range contains no recordings.", "Nothing to export",
                 MessageBoxButton.OK, MessageBoxImage.Information);
@@ -683,28 +722,41 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         ShowExport = false;
         IsBusy = true;
+        var burnNote = IncludeStamp
+            ? "\n\nNote: timestamp burn-in needs re-encoding and isn't applied to a lossless export; " +
+              "Axis footage already carries a burned-in timestamp."
+            : "";
         try
         {
             var fs = _card.FileSystem!;
+            var extension = container == Core.Export.ExportContainer.Mp4 ? "mp4" : "mkv";
             long totalBytes = 0;
-            var totalFiles = 0;
-            foreach (var recording in recordings)
+            var index = 0;
+
+            foreach (var slice in slices)
             {
-                var progress = new Progress<Core.Export.ExportProgress>(p =>
-                {
-                    var pct = p.BytesTotal > 0 ? p.BytesDone * 100 / p.BytesTotal : 0;
-                    BusyText = $"Exporting {p.CurrentFile} ({pct}%)";
-                });
-                var result = await _card.RunExclusive(() =>
-                    Core.Export.RecordingExporter.Export(fs, recording, dialog.FolderName, progress));
-                totalBytes += result.BytesExported;
-                totalFiles += result.FilesExported;
+                index++;
+                var name = $"{slice.WallClockStart:yyyy-MM-dd_HH-mm-ss}_{Player.CameraName.Replace(' ', '-')}.{extension}";
+                var outputPath = System.IO.Path.Combine(dialog.FolderName, name);
+
+                var progress = new Progress<Core.Export.FfmpegProgress>(p =>
+                    BusyText = slices.Count > 1
+                        ? $"Exporting clip {index}/{slices.Count} · {p.Phase} {p.Fraction:P0}"
+                        : $"Exporting · {p.Phase} {p.Fraction:P0}");
+
+                // Runs on the card's exclusive I/O queue: chunk reads + ffmpeg are serialized
+                // against playback so the shared device stream is never touched concurrently.
+                var result = await _card.RunExclusiveAsync(ct =>
+                    Core.Export.FfmpegExporter.ExportAsync(
+                        fs, slice.Chunks, slice.TrimStart, slice.TrimEnd, container.Value, outputPath, progress, ct));
+                totalBytes += result.Bytes;
             }
 
             MessageBox.Show(
-                $"Exported {totalFiles} original recording file{(totalFiles == 1 ? "" : "s")} " +
-                $"({totalBytes / (1024.0 * 1024):F0} MB) to:\n{dialog.FolderName}\n\n" +
-                "Files are lossless copies of the on-card MKV recordings. The card was not modified.",
+                $"Exported {slices.Count} clip{(slices.Count == 1 ? "" : "s")} " +
+                $"({totalBytes / (1024.0 * 1024):F0} MB, {extension.ToUpperInvariant()}) to:\n{dialog.FolderName}\n\n" +
+                "Trimmed to your marked range and stream-copied (no quality loss). The card was not modified." +
+                burnNote,
                 "Export complete", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)

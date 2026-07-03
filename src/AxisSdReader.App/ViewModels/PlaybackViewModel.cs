@@ -455,17 +455,29 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         SelOutSeconds = null;
     }
 
-    /// <summary>Recordings whose footage overlaps the current export selection.</summary>
-    public IReadOnlyList<Recording> RecordingsInSelection()
+    /// <summary>
+    /// Builds export jobs for the current selection: one slice per overlapping recording
+    /// (recordings are gap-separated, so each becomes its own trimmed output). Ensures each
+    /// segment's chunk metadata is exact so trim offsets are accurate.
+    /// </summary>
+    public async Task<IReadOnlyList<ExportSlice>> BuildExportSlices()
     {
-        if (SelInSeconds is not { } inSec || SelOutSeconds is not { } outSec || outSec <= inSec)
+        if (_card is null || SelInSeconds is not { } inSec || SelOutSeconds is not { } outSec || outSec <= inSec)
         {
             return [];
         }
 
-        return _segments
-            .Where(s => s.EndSeconds > inSec && s.StartSeconds < outSec)
-            .Select(s => s.Recording)
+        var overlapping = _segments.Where(s => s.EndSeconds > inSec && s.StartSeconds < outSec).ToList();
+        foreach (var segment in overlapping.Where(s => !s.IsRefined))
+        {
+            await _card.LoadMetadataAsync(segment.Recording);
+            segment.Refine();
+        }
+
+        return overlapping
+            .Select(s => s.SliceFor(inSec, outSec))
+            .Where(s => s is not null)
+            .Select(s => s!)
             .ToList();
     }
 

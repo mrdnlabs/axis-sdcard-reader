@@ -29,6 +29,18 @@ public static class TimeAxis
     public static string DateLong(double seconds) => ToDateTime(seconds).ToString("ddd, MMM d, yyyy");
 }
 
+/// <summary>An export job for one recording: the chunks overlapping the range plus the trim
+/// offsets relative to the first chunk.</summary>
+public sealed record ExportSlice(
+    Recording Recording,
+    IReadOnlyList<RecordingChunk> Chunks,
+    TimeSpan TrimStart,
+    TimeSpan TrimEnd,
+    DateTime WallClockStart)
+{
+    public TimeSpan Duration => TrimEnd - TrimStart;
+}
+
 /// <summary>
 /// One recording placed on the continuous time axis, mapping axis positions onto the
 /// recording's chunk sequence for playback.
@@ -88,6 +100,55 @@ public sealed class TimeSegment
 
     public double SecondsAtChunkStart(int chunkIndex) =>
         StartSeconds + (chunkIndex >= 0 && chunkIndex < _chunkOffsets.Length ? _chunkOffsets[chunkIndex] : 0);
+
+    /// <summary>
+    /// For an absolute time range [absStart, absEnd), returns the chunks of this recording that
+    /// overlap it (in order) plus the trim offsets relative to the first returned chunk. Null when
+    /// the range doesn't intersect this recording. Requires <see cref="Refine"/> for exact trims.
+    /// </summary>
+    public ExportSlice? SliceFor(double absStart, double absEnd)
+    {
+        var start = Math.Max(absStart, StartSeconds);
+        var end = Math.Min(absEnd, EndSeconds);
+        if (end <= start || _chunkOffsets.Length == 0)
+        {
+            return null;
+        }
+
+        var relStart = start - StartSeconds;
+        var relEnd = end - StartSeconds;
+
+        var firstIndex = -1;
+        var lastIndex = -1;
+        for (var i = 0; i < _chunkOffsets.Length; i++)
+        {
+            var chunkStart = _chunkOffsets[i];
+            var chunkEnd = i + 1 < _chunkOffsets.Length ? _chunkOffsets[i + 1] : DurationSeconds;
+            if (chunkStart < relEnd && chunkEnd > relStart)
+            {
+                if (firstIndex < 0)
+                {
+                    firstIndex = i;
+                }
+
+                lastIndex = i;
+            }
+        }
+
+        if (firstIndex < 0)
+        {
+            return null;
+        }
+
+        var firstOffset = _chunkOffsets[firstIndex];
+        var chunks = Recording.Chunks.Skip(firstIndex).Take(lastIndex - firstIndex + 1).ToList();
+        return new ExportSlice(
+            Recording,
+            chunks,
+            TimeSpan.FromSeconds(Math.Max(0, relStart - firstOffset)),
+            TimeSpan.FromSeconds(relEnd - firstOffset),
+            TimeAxis.ToDateTime(start));
+    }
 
     /// <summary>Best-known duration without requiring metadata (used for labels and span math).</summary>
     public static TimeSpan EstimateDuration(Recording recording)
