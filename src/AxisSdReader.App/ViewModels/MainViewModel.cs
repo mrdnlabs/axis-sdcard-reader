@@ -379,15 +379,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         var cameras = new List<CameraNode>();
         foreach (var camera in index.Cameras)
         {
-            // Multi-sensor cameras record each lens as a separate VAPIX source.
+            // Multi-sensor cameras record each lens as a separate VAPIX source. Order numeric
+            // sources naturally (1, 3, 4, 5) so gaps are visible.
             var lenses = camera.Recordings
                 .GroupBy(r => r.SourceToken)
-                .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
-                .Select((g, i) => new LensNode(i + 1, g.Key, g
+                .Select(g => new LensNode(g.Key, g
                     .GroupBy(LocalDate)
                     .OrderByDescending(d => d.Key)
                     .Select(d => new DateNode(d.Key, d.OrderBy(r => r.StartTime).ToList()))
                     .ToList()))
+                .OrderBy(l => l.SourceNumber ?? int.MaxValue)
+                .ThenBy(l => l.SourceToken, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             var name = $"Camera {camera.Serial[^Math.Min(4, camera.Serial.Length)..]}";
@@ -582,19 +584,48 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        foreach (var lens in camera.Lenses)
+        // Show every source the camera appears to have (1..highest recorded), so an un-recorded
+        // sensor shows as a disabled placeholder rather than silently vanishing — which is what
+        // made it look like a recorded source was missing.
+        var recorded = camera.Lenses.Where(l => l.SourceNumber is not null)
+            .ToDictionary(l => l.SourceNumber!.Value);
+        var maxNumeric = recorded.Keys.DefaultIfEmpty(0).Max();
+
+        for (var n = 1; n <= maxNumeric; n++)
         {
-            LensTabs.Add(new LensTab(lens, SelectLensCommand) { IsActive = lens == camera.ActiveLens });
+            if (recorded.TryGetValue(n, out var lens))
+            {
+                LensTabs.Add(LensTab.Recorded(lens, SelectLensCommand));
+            }
+            else
+            {
+                LensTabs.Add(LensTab.Missing(n));
+            }
         }
 
-        LensHint = $"{camera.Lenses.Count} lenses recorded by this camera · viewed one at a time";
+        // Any non-numeric source tokens (rare) as plain recorded tabs after the numeric ones.
+        foreach (var lens in camera.Lenses.Where(l => l.SourceNumber is null))
+        {
+            LensTabs.Add(LensTab.Recorded(lens, SelectLensCommand));
+        }
+
+        foreach (var tab in LensTabs)
+        {
+            tab.IsActive = tab.Node == camera.ActiveLens;
+        }
+
+        var recordedCount = camera.Lenses.Count;
+        var missing = LensTabs.Count(t => !t.IsRecorded);
+        LensHint = missing > 0
+            ? $"{recordedCount} of {LensTabs.Count} sources recorded · viewed one at a time"
+            : $"{recordedCount} lenses recorded · viewed one at a time";
     }
 
     [RelayCommand]
     private async Task SelectLens(LensTab tab)
     {
         var camera = _cameras.FirstOrDefault(c => c.Serial == _selectedCameraSerial);
-        if (_card is null || camera is null || camera.ActiveLens == tab.Node)
+        if (_card is null || camera is null || tab.Node is null || camera.ActiveLens == tab.Node)
         {
             return;
         }

@@ -160,7 +160,8 @@
 
         <!-- Sidebar tree row templates (implicit by type) -->
         <DataTemplate DataType="{x:Type vm:CameraRow}">
-            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="34">
+            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="34"
+                    AutomationProperties.Name="{Binding Name}">
                 <Button.Template>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="B" Background="Transparent" CornerRadius="7" Padding="8,0">
@@ -215,7 +216,8 @@
         </DataTemplate>
 
         <DataTemplate DataType="{x:Type vm:DateRow}">
-            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="34" Margin="20,0,0,0">
+            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="34" Margin="20,0,0,0"
+                    AutomationProperties.Name="{Binding Label}">
                 <Button.Template>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="B" Background="Transparent" CornerRadius="7" Padding="8,0">
@@ -257,7 +259,8 @@
         </DataTemplate>
 
         <DataTemplate DataType="{x:Type vm:ClipRow}">
-            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="38" Margin="40,0,0,0">
+            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="38" Margin="40,0,0,0"
+                    AutomationProperties.Name="{Binding TimeRange}">
                 <Button.Template>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="B" Background="Transparent" CornerRadius="7" Padding="8,0">
@@ -292,9 +295,13 @@
             </Button>
         </DataTemplate>
 
-        <!-- Lens tab -->
+        <!-- Lens tab (recorded = selectable; missing source = disabled placeholder) -->
         <DataTemplate DataType="{x:Type vm:LensTab}">
-            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Margin="0,0,8,0">
+            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Margin="0,0,8,0"
+                    IsEnabled="{Binding IsRecorded}" ToolTipService.ShowOnDisabled="True">
+                <Button.ToolTip>
+                    <TextBlock Text="{Binding Name, StringFormat='Source {0}'}" />
+                </Button.ToolTip>
                 <Button.Template>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="B" Height="36" CornerRadius="9" Padding="9,0,14,0"
@@ -302,18 +309,27 @@
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <Border x:Name="Badge" Width="20" Height="20" CornerRadius="5"
                                         Background="{DynamicResource T.Chip}" Margin="0,0,9,0">
-                                    <TextBlock x:Name="Num" Text="{Binding Number}" FontFamily="{StaticResource MonoFont}"
+                                    <TextBlock x:Name="Num" Text="{Binding Badge}" FontFamily="{StaticResource MonoFont}"
                                                FontSize="11" FontWeight="Bold" Foreground="{DynamicResource T.Muted2}"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <TextBlock x:Name="Lbl" Text="{Binding Label}" FontSize="12.5" FontWeight="SemiBold"
-                                           Foreground="{DynamicResource T.Text2}" VerticalAlignment="Center" />
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock x:Name="Lbl" Text="{Binding Node.Label}" FontSize="12.5" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource T.Text2}" />
+                                    <TextBlock x:Name="Sub" Text="{Binding Name}" FontSize="10"
+                                               Foreground="{DynamicResource T.Muted3}" />
+                                </StackPanel>
                             </StackPanel>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Hover}" />
                             </Trigger>
+                            <DataTrigger Binding="{Binding IsRecorded}" Value="False">
+                                <!-- Placeholder for an un-recorded source: dimmed, "Source N / not recorded". -->
+                                <Setter TargetName="B" Property="Opacity" Value="0.45" />
+                                <Setter TargetName="Lbl" Property="Text" Value="{Binding Badge, StringFormat='Source {0}'}" />
+                            </DataTrigger>
                             <DataTrigger Binding="{Binding IsActive}" Value="True">
                                 <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentTint}" />
                                 <Setter TargetName="B" Property="BorderBrush" Value="{DynamicResource T.Accent}" />
@@ -551,6 +567,7 @@
                             </Border.Effect>
                             <Grid>
                                 <vlc:VideoView x:Name="VideoView" MediaPlayer="{Binding Player.MediaPlayer}"
+                                               Background="Black"
                                                Visibility="{Binding Player.HasFootage, Converter={StaticResource BoolToVis}}" />
                                 <!-- Gap state (colors fixed: the video area is always dark) -->
                                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"

@@ -25,22 +25,49 @@ public sealed class DateNode
 }
 
 /// <summary>One lens (recording source) of a camera. Multi-sensor Axis cameras record each
-/// lens as a separate VAPIX source; single-sensor cameras have exactly one.</summary>
+/// lens as a separate VAPIX source; single-sensor cameras have exactly one. Labelled by the
+/// real VAPIX source token so gaps (un-recorded sensors) are visible.</summary>
 public sealed class LensNode
 {
-    public LensNode(int number, string sourceToken, IReadOnlyList<DateNode> dates)
+    public LensNode(string sourceToken, IReadOnlyList<DateNode> dates)
     {
-        Number = number;
         SourceToken = sourceToken;
         Dates = dates;
+        SourceNumber = int.TryParse(sourceToken, out var n) ? n : null;
+        Resolution = DescribeResolution(dates.SelectMany(d => d.Recordings).FirstOrDefault());
     }
 
-    public int Number { get; }
+    /// <summary>VAPIX source token exactly as recorded (e.g. "1", "3", "5").</summary>
     public string SourceToken { get; }
-    public string Label => $"Lens {Number}";
+
+    /// <summary>Numeric form of the source token, when it is a plain number.</summary>
+    public int? SourceNumber { get; }
+
+    public string Label => $"Source {SourceToken}";
+
+    /// <summary>Friendly resolution ("4K" / "1080p" / "WxH"), for telling lenses apart.</summary>
+    public string Resolution { get; }
+
     public IReadOnlyList<DateNode> Dates { get; }
     public IEnumerable<Recording> Recordings => Dates.SelectMany(d => d.Recordings);
     public int ClipCount => Dates.Sum(d => d.ClipCount);
+
+    private static string DescribeResolution(Recording? recording)
+    {
+        if (recording?.Info is not { Width: { } w, Height: { } h })
+        {
+            return "";
+        }
+
+        return (w, h) switch
+        {
+            (3840, 2160) => "4K",
+            (2560, 1440) => "1440p",
+            (1920, 1080) => "1080p",
+            (1280, 720) => "720p",
+            _ => $"{w}×{h}",
+        };
+    }
 }
 
 /// <summary>One camera on the card: its lenses (recording sources), each with recordings
@@ -66,22 +93,38 @@ public sealed class CameraNode
     public int TotalClips => Lenses.Sum(l => l.ClipCount);
 }
 
-/// <summary>A lens tab in the lens bar.</summary>
+/// <summary>A tab in the lens bar. Recorded sources are selectable; a source the camera
+/// supports but that wasn't recorded appears as a disabled placeholder so the user can see
+/// exactly which lenses have footage.</summary>
 public sealed partial class LensTab : ObservableObject
 {
-    public LensTab(LensNode node, ICommand command)
+    private LensTab(string badge, string name, LensNode? node, ICommand? command, bool isRecorded)
     {
+        Badge = badge;
+        Name = name;
         Node = node;
         Command = command;
+        IsRecorded = isRecorded;
     }
 
-    public LensNode Node { get; }
-    public ICommand Command { get; }
-    public string Number => Node.Number.ToString();
-    public string Label => Node.Label;
+    /// <summary>The number badge — the real VAPIX source token.</summary>
+    public string Badge { get; }
+
+    /// <summary>Secondary label: resolution for recorded lenses, "not recorded" for placeholders.</summary>
+    public string Name { get; }
+
+    public LensNode? Node { get; }
+    public ICommand? Command { get; }
+    public bool IsRecorded { get; }
 
     [ObservableProperty]
     private bool _isActive;
+
+    public static LensTab Recorded(LensNode node, ICommand command) =>
+        new(node.SourceToken, node.Resolution.Length > 0 ? node.Resolution : "recorded", node, command, isRecorded: true);
+
+    public static LensTab Missing(int sourceNumber) =>
+        new(sourceNumber.ToString(), "not recorded", null, null, isRecorded: false);
 }
 
 /// <summary>Base for the flattened browse-tree rows bound to the sidebar ItemsControl.</summary>

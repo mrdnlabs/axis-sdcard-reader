@@ -507,8 +507,14 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
             return;
         }
 
-        MediaPlayer.Stop();
-        DisposeCurrentMedia();
+        // Swap media WITHOUT an explicit Stop(): Stop() tears down libvlc's video output, which
+        // exposes the host window's (white) background for a moment. Calling Play(newMedia)
+        // keeps the output alive so the transition clears to black instead of flashing white.
+        // The previous media/input/stream are disposed a beat later, once libvlc has released
+        // them, to avoid the demux-callback race that a synchronous dispose would hit.
+        var oldMedia = _currentMedia;
+        var oldInput = _currentInput;
+        var oldStream = _currentStream;
 
         _activeChunk = chunkIndex;
         _currentStream = _card.OpenChunk(segment.Recording.Chunks[chunkIndex]);
@@ -529,6 +535,19 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
             // Show the frame but stay paused. A tiny delay lets VLC render the first frame.
             _dispatcher.BeginInvoke(DispatcherPriority.Background, () => MediaPlayer.SetPause(true));
         }
+
+        if (oldMedia is not null || oldInput is not null || oldStream is not null)
+        {
+            _ = DisposeAfterSwap(oldMedia, oldInput, oldStream);
+        }
+    }
+
+    private static async Task DisposeAfterSwap(Media? media, MediaInput? input, Stream? stream)
+    {
+        await Task.Delay(250);
+        try { media?.Dispose(); } catch { /* best effort */ }
+        try { input?.Dispose(); } catch { /* best effort */ }
+        try { stream?.Dispose(); } catch { /* best effort */ }
     }
 
     private void OnChunkTimeChanged(long chunkTimeMs)
