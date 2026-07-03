@@ -104,18 +104,27 @@ public sealed class Recording
                     return chunk;
                 }
 
-                var block = chunk.SidecarPath is { } sidecar
-                    ? RecordingXml.TryParseBlock(fileSystem, sidecar)
-                    : null;
-
-                MkvMetadata? metadata = null;
-                if (block?.Duration is null)
+                // One unreadable chunk (truncated, corrupt, or a filesystem read error) must not
+                // abort the whole recording — degrade to no metadata and carry on.
+                try
                 {
-                    using var stream = fileSystem.OpenFile(chunk.Path, FileMode.Open, FileAccess.Read);
-                    metadata = MkvMetadataReader.Read(stream);
-                }
+                    var block = chunk.SidecarPath is { } sidecar
+                        ? RecordingXml.TryParseBlock(fileSystem, sidecar)
+                        : null;
 
-                return chunk with { Block = block, Metadata = metadata };
+                    MkvMetadata? metadata = null;
+                    if (block?.Duration is null)
+                    {
+                        using var stream = fileSystem.OpenFile(chunk.Path, FileMode.Open, FileAccess.Read);
+                        metadata = MkvMetadataReader.Read(stream);
+                    }
+
+                    return chunk with { Block = block, Metadata = metadata };
+                }
+                catch (Exception ex) when (ex is IOException or EndOfStreamException or InvalidOperationException)
+                {
+                    return chunk;
+                }
             })
             .ToList();
     }

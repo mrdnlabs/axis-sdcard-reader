@@ -131,4 +131,19 @@ public class AxisCardTests
         Assert.NotNull(meta.Duration);
         Assert.True(meta.Duration!.Value > TimeSpan.Zero);
     }
+
+    [Theory]
+    [InlineData(new byte[0])]                                  // empty
+    [InlineData(new byte[] { 0x1A })]                          // one byte of an EBML id, then EOF
+    [InlineData(new byte[] { 0x1A, 0x45, 0xDF })]             // partial EBML id
+    [InlineData(new byte[] { 0x1A, 0x45, 0xDF, 0xA3 })]       // EBML id, no size/body
+    [InlineData(new byte[] { 0x1A, 0x45, 0xDF, 0xA3, 0x84 })] // id + size claiming bytes that aren't there
+    [InlineData(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF })]       // garbage
+    public void NeverThrowsOnTruncatedOrGarbageInput(byte[] bytes)
+    {
+        using var stream = new MemoryStream(bytes);
+        // Must degrade to null, not throw — an uncaught EndOfStreamException here crashed the
+        // app while scrubbing into a recording with an odd chunk.
+        Assert.Null(MkvMetadataReader.Read(stream));
+    }
 }

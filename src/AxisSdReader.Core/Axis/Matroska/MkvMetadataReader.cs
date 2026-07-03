@@ -43,6 +43,25 @@ public static class MkvMetadataReader
     /// element structure (cheap: skips payloads), not a full read.</param>
     public static MkvMetadata? Read(Stream stream, bool scanClustersForDuration = true)
     {
+        // A metadata reader parsing on-card (possibly truncated/corrupt, or read through a
+        // third-party ext4 stack) files must never throw into the app. Any read failure that
+        // escapes the inner scans degrades to "not readable" rather than crashing.
+        try
+        {
+            return ReadCore(stream, scanClustersForDuration);
+        }
+        catch (EndOfStreamException)
+        {
+            return null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
+
+    private static MkvMetadata? ReadCore(Stream stream, bool scanClustersForDuration)
+    {
         stream.Position = 0;
         if (ReadElementId(stream) != EbmlHeader || SkipElement(stream) is null)
         {
