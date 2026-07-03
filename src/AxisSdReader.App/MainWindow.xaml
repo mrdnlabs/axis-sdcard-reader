@@ -426,7 +426,10 @@
                                 <DropShadowEffect BlurRadius="30" ShadowDepth="8" Direction="270" Opacity="0.28" Color="#141A23" />
                             </Border.Effect>
                             <Grid>
-                                <!-- Real video render surface -->
+                                <!-- Real video render surface. Kept in the visual tree from the start so
+                                     it owns its native HWND before playback begins (creating it lazily makes
+                                     libvlc spawn its own detached output window). The ~1s HWND init is hidden
+                                     behind the OS splash screen at startup. -->
                                 <vlc:VideoView x:Name="VideoView" MediaPlayer="{Binding Player.MediaPlayer}"
                                                Visibility="{Binding Player.HasFootage, Converter={StaticResource BoolToVis}}" />
                                 <!-- No-recording gap state -->
