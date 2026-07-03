@@ -70,10 +70,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<BrowseRow> Rows { get; } = [];
 
-    public DayPlayerViewModel Player { get; } = new();
+    public PlaybackViewModel Player { get; } = new();
 
     private string? _selectedCameraSerial;
     private string? _selectedDateKey;
+    private string? _loadedCameraSerial;
     private readonly HashSet<string> _expandedCameras = [];
     private readonly HashSet<string> _expandedDates = [];
 
@@ -223,9 +224,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             RebuildRows();
             IsCardOpen = true;
 
-            if (_cameras.Count > 0 && _selectedDateKey is not null)
+            if (_cameras.Count > 0)
             {
-                await LoadActiveDay(seekFirst: true);
+                await LoadCameraIntoPlayer(_cameras[0]);
             }
         }
         catch (Exception ex)
@@ -269,8 +270,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         if (index.Recordings.Count > 0)
         {
+            // Span covers recording ENDS too: an overnight recording extends the last day.
             var first = index.Recordings.Min(r => LocalDate(r));
-            var last = index.Recordings.Max(r => LocalDate(r));
+            var last = index.Recordings
+                .Max(r => LocalStart(r).Add(TimeSegment.EstimateDuration(r)).Date);
             FootageSpanLabel = first == last
                 ? first.ToString("MMM d, yyyy")
                 : $"{first:MMM d} – {last:MMM d, yyyy}";
@@ -320,17 +323,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     {
                         foreach (var recording in date.Recordings)
                         {
-                            var timeRange = FormatTimeRange(recording);
-                            if (hasQuery && !cameraMatches && !timeRange.Contains(query, StringComparison.OrdinalIgnoreCase)
+                            var clip = new ClipRow(camera, date, recording, SelectClipCommand)
+                            {
+                                IsSelected = recording == Player.ActiveRecording,
+                            };
+                            if (hasQuery && !cameraMatches && !clip.TimeRange.Contains(query, StringComparison.OrdinalIgnoreCase)
                                 && !date.LongLabel.Contains(query, StringComparison.OrdinalIgnoreCase))
                             {
                                 continue;
                             }
 
-                            var clip = new ClipRow(camera, date, recording, timeRange, FormatClipDuration(recording), SelectClipCommand)
-                            {
-                                IsSelected = recording == Player.ActiveRecording,
-                            };
                             _clipRows[recording] = clip;
                             if (clip.IsSelected)
                             {
@@ -372,7 +374,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     partial void OnSearchTextChanged(string value) => RebuildRows();
 
     [RelayCommand]
-    private void SelectCamera(CameraRow row)
+    private async Task SelectCamera(CameraRow row)
     {
         var serial = row.Node.Serial;
         if (!_expandedCameras.Remove(serial))
@@ -382,6 +384,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         _selectedCameraSerial = serial;
         RebuildRows();
+        await LoadCameraIntoPlayer(row.Node);
     }
 
     [RelayCommand]
@@ -395,63 +398,37 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         _selectedCameraSerial = row.Camera.Serial;
         _selectedDateKey = key;
-        Player.ClearSelection();
         RebuildRows();
-        await LoadActiveDay(seekFirst: true);
+
+        await LoadCameraIntoPlayer(row.Camera);
+        var first = row.Node.Recordings.FirstOrDefault();
+        if (first is not null)
+        {
+            await Player.SeekToRecording(first);
+        }
     }
 
     [RelayCommand]
-    private void SelectClip(ClipRow row)
+    private async Task SelectClip(ClipRow row)
     {
         _selectedCameraSerial = row.Camera.Serial;
         _selectedDateKey = row.Date.Key;
-        Player.SeekToRecording(row.Recording);
+        await LoadCameraIntoPlayer(row.Camera);
+        await Player.SeekToRecording(row.Recording);
     }
 
-    private async Task LoadActiveDay(bool seekFirst)
+    /// <summary>Loads all of a camera's recordings into the player (no-op if already loaded).</summary>
+    private async Task LoadCameraIntoPlayer(CameraNode camera)
     {
-        if (_card is null)
+        if (_card is null || _loadedCameraSerial == camera.Serial)
         {
             return;
         }
 
-        var camera = _cameras.FirstOrDefault(c => c.Serial == _selectedCameraSerial);
-        var date = camera?.Dates.FirstOrDefault(d => d.Key == _selectedDateKey);
-        if (camera is null || date is null)
-        {
-            return;
-        }
-
-        IsBusy = true;
-        BusyText = "Reading recording details…";
-        try
-        {
-            await _card.LoadMetadataAsync(date.Recordings);
-
-            // Enrich the camera model from the actual camera-written MKV header, once known.
-            var model = date.Recordings
-                .SelectMany(r => r.Chunks)
-                .Select(c => c.Metadata?.WritingApp)
-                .FirstOrDefault(w => !string.IsNullOrWhiteSpace(w));
-            if (model is not null)
-            {
-                camera.Model = model;
-            }
-
-            // Row labels (time ranges, durations) were built before durations were known.
-            RebuildRows();
-
-            await Player.LoadDay(_card, camera.Name, camera.Model, date.Date, date.Recordings);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(ex.Message, "Error reading recordings", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            IsBusy = false;
-            BusyText = "";
-        }
+        Player.ClearSelection();
+        var recordings = camera.Dates.SelectMany(d => d.Recordings).OrderBy(r => r.StartTime).ToList();
+        await Player.LoadCamera(_card, camera.Name, camera.Model, recordings);
+        _loadedCameraSerial = camera.Serial;
     }
 
     private void OnActiveRecordingChanged(Recording? recording)
@@ -466,6 +443,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             row.IsSelected = true;
             _highlightedClip = row;
+
+            // Metadata is loaded by the seek that made this recording active — labels can
+            // now show exact times, and the MKV header tells us the true camera model.
+            row.RefreshLabels();
+            var model = recording.Chunks
+                .Select(c => c.Metadata?.WritingApp)
+                .FirstOrDefault(w => !string.IsNullOrWhiteSpace(w));
+            if (model is not null && Player.CameraModel != model)
+            {
+                Player.CameraModel = model;
+                var camera = _cameras.FirstOrDefault(c => c.Serial == _selectedCameraSerial);
+                if (camera is not null)
+                {
+                    camera.Model = model;
+                }
+            }
         }
     }
 
@@ -557,6 +550,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Rows.Clear();
         _clipRows.Clear();
         _cameras = [];
+        _loadedCameraSerial = null;
         IsCardOpen = false;
         _card?.Dispose();
         _card = null;
@@ -580,21 +574,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     // --- helpers -------------------------------------------------------------
 
-    private static DateTime LocalDate(Recording r)
+    private static DateTime LocalStart(Recording r)
     {
         var s = r.StartTime;
-        return (s.Kind == DateTimeKind.Utc ? s.ToLocalTime() : s).Date;
+        return s.Kind == DateTimeKind.Utc ? s.ToLocalTime() : s;
     }
 
-    private static string FormatTimeRange(Recording r)
-    {
-        var start = r.StartTime.Kind == DateTimeKind.Utc ? r.StartTime.ToLocalTime() : r.StartTime;
-        var end = r.Duration is { } d ? start + d : start;
-        return $"{start:HH:mm} – {end:HH:mm}";
-    }
-
-    private static string FormatClipDuration(Recording r) =>
-        r.Duration is { } d ? DayPlayerViewModel.FormatDuration(d) : "—";
+    private static DateTime LocalDate(Recording r) => LocalStart(r).Date;
 
     private static string FormatMac(string serial)
     {

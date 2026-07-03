@@ -15,7 +15,8 @@ public partial class MainWindow : Window
         _viewModel = new MainViewModel();
         DataContext = _viewModel;
 
-        Timeline.Seek += seconds => _viewModel.Player.SeekToDaySeconds(seconds);
+        Timeline.Scrubbing += seconds => _viewModel.Player.ScrubPreview(seconds);
+        Timeline.ScrubCommitted += seconds => _viewModel.Player.ScrubCommit(seconds);
         SourceInitialized += OnSourceInitialized;
         Closed += (_, _) => _viewModel.Dispose();
 

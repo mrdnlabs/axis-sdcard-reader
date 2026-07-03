@@ -412,7 +412,7 @@
                             <TextBlock DockPanel.Dock="Left" Text="{Binding Player.CameraModel}" FontSize="12"
                                        Foreground="#9AA3AE" VerticalAlignment="Center" Margin="0,0,12,0" />
                             <Border DockPanel.Dock="Left" Width="1" Height="16" Background="#E2E5E9" Margin="0,0,12,0" />
-                            <TextBlock DockPanel.Dock="Left" Text="{Binding Player.DateLabel}" FontSize="13"
+                            <TextBlock DockPanel.Dock="Left" Text="{Binding Player.PositionDateLong}" FontSize="13"
                                        Foreground="#5B6470" VerticalAlignment="Center" />
                             <TextBlock DockPanel.Dock="Right" Text="{Binding Player.SegCountLabel}" FontSize="11.5"
                                        Foreground="#8A929C" VerticalAlignment="Center" />
@@ -476,8 +476,10 @@
                         <StackPanel>
                             <!-- Timeline header -->
                             <DockPanel LastChildFill="False" Margin="0,0,0,6">
-                                <TextBlock DockPanel.Dock="Left" Text="TIMELINE · FULL DAY" FontSize="11" FontWeight="Bold"
+                                <TextBlock DockPanel.Dock="Left" Text="TIMELINE" FontSize="11" FontWeight="Bold"
                                            Foreground="#8A929C" VerticalAlignment="Center" />
+                                <TextBlock DockPanel.Dock="Left" Text="drag to scrub · scroll to zoom" FontSize="11"
+                                           Foreground="#B3BCC7" VerticalAlignment="Center" Margin="12,0,0,0" />
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                     <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
                                         <Border Width="12" Height="6" CornerRadius="2" Background="#2F6FED" VerticalAlignment="Center" Margin="0,0,6,0" />
@@ -496,7 +498,7 @@
 
                             <ctrl:TimelineControl x:Name="Timeline"
                                                   SegmentsSource="{Binding Player.TimelineSegments}"
-                                                  CurrentSeconds="{Binding Player.CurrentSeconds}"
+                                                  CenterSeconds="{Binding Player.CurrentSeconds, Mode=OneWay}"
                                                   SelInSeconds="{Binding Player.SelInSeconds}"
                                                   SelOutSeconds="{Binding Player.SelOutSeconds}" />
 
@@ -551,7 +553,7 @@
                                     <TextBlock Text="{Binding Player.ClockString}" FontFamily="{StaticResource MonoFont}"
                                                FontSize="20" FontWeight="SemiBold" Foreground="#1F2328" />
                                     <TextBlock FontSize="11" Foreground="#96A0AB">
-                                        <Run Text="of " /><Run Text="{Binding Player.DateLabelShort, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Player.StatusLabel, Mode=OneWay}" />
+                                        <Run Text="of " /><Run Text="{Binding Player.PositionDateShort, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Player.StatusLabel, Mode=OneWay}" />
                                     </TextBlock>
                                 </StackPanel>
 
@@ -720,7 +722,7 @@
                                     <TextBlock Text="{Binding Player.SelectionRangeText}" FontSize="13.5" FontWeight="SemiBold"
                                                Foreground="#1F2328" FontFamily="{StaticResource MonoFont}" />
                                     <TextBlock FontSize="12" Foreground="#96A0AB">
-                                        <Run Text="{Binding Player.SelectionDurationText, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Player.DateLabelShort, Mode=OneWay}" />
+                                        <Run Text="{Binding Player.SelectionDurationText, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Player.PositionDateShort, Mode=OneWay}" />
                                     </TextBlock>
                                 </StackPanel>
                             </Grid>

@@ -11,27 +11,28 @@ using LibVLCSharp.Shared;
 namespace AxisSdReader.App.ViewModels;
 
 /// <summary>
-/// Plays a whole day of recordings as one seamless timeline. The day position
-/// (<see cref="CurrentSeconds"/>, 0–86400) maps onto recording segments and their MKV chunks;
-/// while playing, reaching the end of a recording jumps to the start of the next one, skipping
-/// gaps. Also owns the export mark-in/out range for the current day.
+/// Plays a camera's recordings on a continuous time axis (see <see cref="TimeAxis"/>).
+/// The position maps onto recording segments and their MKV chunks; while playing, reaching
+/// the end of a recording jumps to the start of the next, skipping gaps — across midnight
+/// or across days, since time is continuous. Segments are placed from chunk-name estimates
+/// and refined with exact metadata the first time the playhead enters them.
+/// Also owns the export mark-in/out range.
 /// </summary>
-public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
+public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
 {
-    private const double Day = 86400.0;
-
     private readonly Task _initTask;
     private readonly Dispatcher _dispatcher;
     private LibVLC? _libVlc;
 
     private OpenCard? _card;
-    private DaySegment[] _segments = [];
+    private TimeSegment[] _segments = [];
     private int _activeSegment = -1;
     private int _activeChunk = -1;
     private Stream? _currentStream;
     private MediaInput? _currentInput;
     private Media? _currentMedia;
-    private bool _suppressPositionEvents;
+    private bool _isScrubbing;
+    private int _seekVersion;
 
     [ObservableProperty]
     private MediaPlayer? _mediaPlayer;
@@ -39,6 +40,8 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ClockString))]
     [NotifyPropertyChangedFor(nameof(BurnedStamp))]
+    [NotifyPropertyChangedFor(nameof(PositionDateShort))]
+    [NotifyPropertyChangedFor(nameof(PositionDateLong))]
     private double _currentSeconds;
 
     [ObservableProperty]
@@ -64,13 +67,6 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
     private string _cameraModel = "";
 
     [ObservableProperty]
-    private string _dateLabel = "";
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(BurnedStamp))]
-    private string _dateLabelShort = "";
-
-    [ObservableProperty]
     private string _segCountLabel = "";
 
     [ObservableProperty]
@@ -91,14 +87,26 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
 
     public bool HasSelection => SelInSeconds is { } i && SelOutSeconds is { } o && o > i;
 
-    public string ClockString => FormatClock(CurrentSeconds);
+    public string ClockString => TimeAxis.ClockText(CurrentSeconds);
+
+    /// <summary>Date at the playhead, short form (e.g. "Jul 2") — updates crossing midnight.</summary>
+    public string PositionDateShort => TimeAxis.DateShort(CurrentSeconds);
+
+    public string PositionDateLong => TimeAxis.DateLong(CurrentSeconds);
 
     public string StatusLabel => IsPlaying
         ? $"Playing {RateText(Rate)}"
         : HasFootage ? "Paused" : "No footage";
 
-    /// <summary>Burned-in overlay text: date + running clock, e.g. "Jun 28  08:47:22".</summary>
-    public string BurnedStamp => $"{DateLabelShort}  {ClockString}";
+    public string BurnedStamp => $"{PositionDateShort}  {ClockString}";
+
+    public string SelectionRangeText => HasSelection
+        ? $"{TimeAxis.ClockText(SelInSeconds!.Value)} – {TimeAxis.ClockText(SelOutSeconds!.Value)}"
+        : "—";
+
+    public string SelectionDurationText => HasSelection
+        ? FormatDuration(TimeSpan.FromSeconds(SelOutSeconds!.Value - SelInSeconds!.Value))
+        : "";
 
     public string SelectionLabel
     {
@@ -106,7 +114,7 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
         {
             if (SelInSeconds is { } i && SelOutSeconds is null)
             {
-                return $"In {FormatClock(i)[..5]} · set out";
+                return $"In {TimeAxis.ClockText(i)[..5]} · set out";
             }
 
             if (HasSelection)
@@ -123,8 +131,6 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static string RateText(float rate) => rate == 1 ? "1×" : $"{rate:0.#}×";
-
     public ObservableCollection<TimelineSegment> TimelineSegments { get; } = [];
 
     public float[] AvailableRates { get; } = [0.5f, 1.0f, 2.0f, 4.0f, 8.0f];
@@ -132,7 +138,7 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
     /// <summary>Fires when the active recording changes, so the tree can highlight the current clip.</summary>
     public event Action<Recording?>? ActiveRecordingChanged;
 
-    public DayPlayerViewModel()
+    public PlaybackViewModel()
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         _initTask = Task.Run(InitializeEngine);
@@ -156,8 +162,8 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
         });
     }
 
-    /// <summary>Loads a day's recordings (metadata already populated) and seeks to the first clip, paused.</summary>
-    public async Task LoadDay(OpenCard card, string cameraName, string cameraModel, DateTime date,
+    /// <summary>Loads a camera's recordings onto the time axis and seeks (paused) to the newest one.</summary>
+    public async Task LoadCamera(OpenCard card, string cameraName, string cameraModel,
         IReadOnlyList<Recording> recordings)
     {
         await _initTask;
@@ -166,83 +172,108 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
         _card = card;
         CameraName = cameraName;
         CameraModel = cameraModel;
-        DateLabel = date.ToString("ddd, MMM d, yyyy");
-        DateLabelShort = date.ToString("MMM d");
         SelInSeconds = null;
         SelOutSeconds = null;
 
         _segments = recordings
-            .Select(r => new DaySegment(r, LocalTimeOfDaySeconds(r)))
-            .OrderBy(s => s.DayStartSeconds)
+            .Select(r => new TimeSegment(r))
+            .OrderBy(s => s.StartSeconds)
             .ToArray();
+        _activeSegment = -1;
 
-        TimelineSegments.Clear();
-        foreach (var segment in _segments)
-        {
-            TimelineSegments.Add(segment.ToTimelineSegment());
-        }
-
-        var totalFootage = TimeSpan.FromSeconds(_segments.Sum(s => s.DurationSeconds));
-        SegCountLabel = $"{_segments.Length} clip{(_segments.Length == 1 ? "" : "s")} · {FormatDuration(totalFootage)} footage";
+        RebuildTimelineSegments();
+        UpdateSegCountLabel();
 
         if (_segments.Length > 0)
         {
-            SeekToDaySeconds(_segments[0].DayStartSeconds, autoPlay: false);
+            await SeekToSeconds(_segments[^1].StartSeconds, autoPlay: false);
         }
         else
         {
-            CurrentSeconds = 12 * 3600;
             HasFootage = false;
             ActiveRecordingChanged?.Invoke(null);
         }
     }
 
-    /// <summary>The recording currently under the playhead, or null in a gap.</summary>
     public Recording? ActiveRecording =>
         _activeSegment >= 0 && _activeSegment < _segments.Length ? _segments[_activeSegment].Recording : null;
 
-    /// <summary>Seeks to a clip's start (used by the tree). Paused.</summary>
-    public void SeekToRecording(Recording recording)
+    /// <summary>Seeks (paused) to a recording's start — used by the browse tree.</summary>
+    public async Task SeekToRecording(Recording recording)
     {
-        var index = Array.FindIndex(_segments, s => s.Recording == recording);
-        if (index >= 0)
+        var segment = _segments.FirstOrDefault(s => s.Recording == recording);
+        if (segment is not null)
         {
-            SeekToDaySeconds(_segments[index].DayStartSeconds, autoPlay: false);
+            await SeekToSeconds(segment.StartSeconds, autoPlay: false);
         }
     }
 
-    /// <summary>Seeks to a day position; plays the containing segment (or shows the gap state).</summary>
-    public void SeekToDaySeconds(double daySeconds, bool? autoPlay = null)
+    /// <summary>Live scrub preview: update the clock/date readouts without touching the media.</summary>
+    public void ScrubPreview(double seconds)
     {
-        daySeconds = Math.Clamp(daySeconds, 0, Day - 1);
+        _isScrubbing = true;
+        CurrentSeconds = seconds;
+    }
+
+    /// <summary>Commits a scrub/click: seek the media to the time now under the playhead.</summary>
+    public async void ScrubCommit(double seconds)
+    {
+        _isScrubbing = false;
+        await SeekToSeconds(seconds, autoPlay: IsPlaying);
+    }
+
+    /// <summary>Seeks to an axis position; plays the containing segment or shows the gap state.</summary>
+    public async Task SeekToSeconds(double seconds, bool? autoPlay = null)
+    {
+        var version = ++_seekVersion;
         var play = autoPlay ?? IsPlaying;
 
-        var segIndex = Array.FindIndex(_segments, s => s.Contains(daySeconds));
+        var segIndex = Array.FindIndex(_segments, s => s.Contains(seconds));
         if (segIndex < 0)
         {
-            // Landed in a gap: stop the picture, keep the playhead where the user put it.
             StopPlayback();
-            CurrentSeconds = daySeconds;
+            CurrentSeconds = seconds;
             HasFootage = false;
             _activeSegment = -1;
             ActiveRecordingChanged?.Invoke(null);
             return;
         }
 
-        // Fast path: seeking within the chunk that's already open (e.g. dragging the playhead)
-        // just moves the playback time — no stream churn, which keeps libvlc stable under drags.
+        var segment = _segments[segIndex];
+
+        // First entry into this recording: load exact chunk metadata (a few small reads),
+        // which can shift the estimated end. Re-resolve afterwards.
+        if (!segment.IsRefined && _card is not null)
+        {
+            await _card.LoadMetadataAsync(segment.Recording);
+            if (version != _seekVersion)
+            {
+                return; // a newer seek superseded this one while metadata loaded
+            }
+
+            segment.Refine();
+            RebuildTimelineSegments();
+            UpdateSegCountLabel();
+
+            if (!segment.Contains(seconds))
+            {
+                seconds = Math.Clamp(seconds, segment.StartSeconds, Math.Max(segment.StartSeconds, segment.EndSeconds - 0.5));
+            }
+        }
+
+        // Fast path: staying inside the currently open chunk just moves the playback time.
         if (segIndex == _activeSegment && MediaPlayer is not null && _currentMedia is not null)
         {
-            var (chunkIndex, offset) = _segments[segIndex].Locate(daySeconds);
+            var (chunkIndex, offset) = segment.Locate(seconds);
             if (chunkIndex == _activeChunk)
             {
-                CurrentSeconds = daySeconds;
+                CurrentSeconds = seconds;
                 MediaPlayer.Time = (long)offset.TotalMilliseconds;
                 return;
             }
         }
 
-        StartAt(segIndex, daySeconds, play);
+        StartAt(segIndex, seconds, play);
     }
 
     [RelayCommand]
@@ -265,57 +296,56 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
         }
         else if (_segments.Length > 0)
         {
-            // In a gap or nothing loaded: jump to the nearest footage and play.
-            JumpNearest(play: true);
+            _ = JumpNearest(play: true);
         }
     }
 
     [RelayCommand]
-    private void StepPrev()
+    private async Task StepPrev()
     {
-        var prev = _segments.Where(s => s.DayStartSeconds < CurrentSeconds - 1).ToArray();
-        if (prev.Length > 0)
+        var prev = _segments.LastOrDefault(s => s.StartSeconds < CurrentSeconds - 1);
+        if (prev is not null)
         {
-            SeekToDaySeconds(prev[^1].DayStartSeconds, autoPlay: IsPlaying);
+            await SeekToSeconds(prev.StartSeconds, autoPlay: IsPlaying);
         }
     }
 
     [RelayCommand]
-    private void StepNext()
+    private async Task StepNext()
     {
-        var next = _segments.FirstOrDefault(s => s.DayStartSeconds > CurrentSeconds + 0.5);
+        var next = _segments.FirstOrDefault(s => s.StartSeconds > CurrentSeconds + 0.5);
         if (next is not null)
         {
-            SeekToDaySeconds(next.DayStartSeconds, autoPlay: IsPlaying);
+            await SeekToSeconds(next.StartSeconds, autoPlay: IsPlaying);
         }
     }
 
     [RelayCommand]
-    private void GoToNearest() => JumpNearest(play: true);
+    private async Task GoToNearest() => await JumpNearest(play: true);
 
-    private void JumpNearest(bool play)
+    private async Task JumpNearest(bool play)
     {
         if (_segments.Length == 0)
         {
             return;
         }
 
-        var next = _segments.FirstOrDefault(s => s.DayStartSeconds > CurrentSeconds);
-        var prev = _segments.LastOrDefault(s => s.DayEndSeconds <= CurrentSeconds);
+        var next = _segments.FirstOrDefault(s => s.StartSeconds > CurrentSeconds);
+        var prev = _segments.LastOrDefault(s => s.EndSeconds <= CurrentSeconds);
 
         double target;
         if (next is not null && prev is not null)
         {
-            target = CurrentSeconds - prev.DayEndSeconds < next.DayStartSeconds - CurrentSeconds
-                ? prev.DayEndSeconds - 1
-                : next.DayStartSeconds;
+            target = CurrentSeconds - prev.EndSeconds < next.StartSeconds - CurrentSeconds
+                ? prev.EndSeconds - 1
+                : next.StartSeconds;
         }
         else
         {
-            target = next?.DayStartSeconds ?? (prev is not null ? prev.DayEndSeconds - 1 : CurrentSeconds);
+            target = next?.StartSeconds ?? (prev is not null ? prev.EndSeconds - 1 : CurrentSeconds);
         }
 
-        SeekToDaySeconds(target, autoPlay: play);
+        await SeekToSeconds(target, autoPlay: play);
     }
 
     [RelayCommand]
@@ -335,7 +365,7 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
         }
         else
         {
-            JumpNearest(play: true);
+            _ = JumpNearest(play: true);
         }
     }
 
@@ -355,7 +385,7 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
         SelInSeconds = CurrentSeconds;
         if (SelOutSeconds is { } o && o <= CurrentSeconds)
         {
-            SelOutSeconds = null; // out before in no longer valid
+            SelOutSeconds = null;
         }
     }
 
@@ -377,29 +407,20 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
         }
 
         return _segments
-            .Where(s => s.DayEndSeconds > inSec && s.DayStartSeconds < outSec)
+            .Where(s => s.EndSeconds > inSec && s.StartSeconds < outSec)
             .Select(s => s.Recording)
             .ToList();
     }
 
-    /// <summary>Clock string for the current selection range, e.g. "08:30:00 – 09:05:00".</summary>
-    public string SelectionRangeText => HasSelection
-        ? $"{FormatClock(SelInSeconds!.Value)} – {FormatClock(SelOutSeconds!.Value)}"
-        : "—";
-
-    public string SelectionDurationText => HasSelection
-        ? FormatDuration(TimeSpan.FromSeconds(SelOutSeconds!.Value - SelInSeconds!.Value))
-        : "";
-
-    private void StartAt(int segIndex, double daySeconds, bool play)
+    private void StartAt(int segIndex, double seconds, bool play)
     {
         var segment = _segments[segIndex];
-        var (chunkIndex, offset) = segment.Locate(daySeconds);
+        var (chunkIndex, offset) = segment.Locate(seconds);
 
         var recordingChanged = segIndex != _activeSegment;
         _activeSegment = segIndex;
         HasFootage = true;
-        CurrentSeconds = daySeconds;
+        CurrentSeconds = seconds;
 
         PlayChunk(segment, chunkIndex, offset, play);
 
@@ -409,7 +430,7 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void PlayChunk(DaySegment segment, int chunkIndex, TimeSpan offset, bool play)
+    private void PlayChunk(TimeSegment segment, int chunkIndex, TimeSpan offset, bool play)
     {
         if (_card is null || MediaPlayer is null || _libVlc is null ||
             chunkIndex < 0 || chunkIndex >= segment.Recording.Chunks.Count)
@@ -443,13 +464,13 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
 
     private void OnChunkTimeChanged(long chunkTimeMs)
     {
-        if (_suppressPositionEvents || _activeSegment < 0 || _activeSegment >= _segments.Length)
+        if (_isScrubbing || _activeSegment < 0 || _activeSegment >= _segments.Length)
         {
             return;
         }
 
         var segment = _segments[_activeSegment];
-        CurrentSeconds = segment.DaySecondsAtChunkStart(_activeChunk) + chunkTimeMs / 1000.0;
+        CurrentSeconds = segment.SecondsAtChunkStart(_activeChunk) + chunkTimeMs / 1000.0;
     }
 
     private void OnChunkEnded()
@@ -466,17 +487,32 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Recording finished — seamlessly jump to the next one, skipping any gap.
+        // Recording finished — seamlessly jump to the next one, skipping the gap.
         var nextIndex = _activeSegment + 1;
         if (nextIndex < _segments.Length)
         {
-            StartAt(nextIndex, _segments[nextIndex].DayStartSeconds, play: true);
+            _ = SeekToSeconds(_segments[nextIndex].StartSeconds, autoPlay: true);
         }
         else
         {
             IsPlaying = false;
-            CurrentSeconds = segment.DayEndSeconds;
+            CurrentSeconds = segment.EndSeconds;
         }
+    }
+
+    private void RebuildTimelineSegments()
+    {
+        TimelineSegments.Clear();
+        foreach (var segment in _segments)
+        {
+            TimelineSegments.Add(new TimelineSegment(segment.StartSeconds, segment.EndSeconds));
+        }
+    }
+
+    private void UpdateSegCountLabel()
+    {
+        var totalFootage = TimeSpan.FromSeconds(_segments.Sum(s => s.DurationSeconds));
+        SegCountLabel = $"{_segments.Length} clip{(_segments.Length == 1 ? "" : "s")} · {FormatDuration(totalFootage)} footage";
     }
 
     private void StopPlayback()
@@ -497,18 +533,7 @@ public sealed partial class DayPlayerViewModel : ObservableObject, IDisposable
         _currentStream = null;
     }
 
-    private static double LocalTimeOfDaySeconds(Recording recording)
-    {
-        var start = recording.StartTime;
-        var local = start.Kind == DateTimeKind.Utc ? start.ToLocalTime() : start;
-        return local.TimeOfDay.TotalSeconds;
-    }
-
-    public static string FormatClock(double daySeconds)
-    {
-        var s = (int)Math.Clamp(daySeconds, 0, Day - 1);
-        return $"{s / 3600:00}:{s % 3600 / 60:00}:{s % 60:00}";
-    }
+    private static string RateText(float rate) => rate == 1 ? "1×" : $"{rate:0.#}×";
 
     public static string FormatDuration(TimeSpan span)
     {

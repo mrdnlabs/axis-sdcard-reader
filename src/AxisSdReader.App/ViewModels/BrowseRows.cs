@@ -85,20 +85,36 @@ public sealed partial class DateRow : BrowseRow
 
 public sealed partial class ClipRow : BrowseRow
 {
-    public ClipRow(CameraNode camera, DateNode date, Recording recording, string timeRange, string duration, ICommand command)
+    public ClipRow(CameraNode camera, DateNode date, Recording recording, ICommand command)
     {
         Camera = camera;
         Date = date;
         Recording = recording;
-        TimeRange = timeRange;
-        Duration = duration;
         Command = command;
+        (_timeRange, _duration) = ComputeLabels(recording);
     }
 
     public CameraNode Camera { get; }
     public DateNode Date { get; }
     public Recording Recording { get; }
-    public string TimeRange { get; }
-    public string Duration { get; }
     public ICommand Command { get; }
+
+    [ObservableProperty]
+    private string _timeRange;
+
+    [ObservableProperty]
+    private string _duration;
+
+    /// <summary>Recomputes labels once exact metadata has replaced the chunk-name estimate.</summary>
+    public void RefreshLabels() => (TimeRange, Duration) = ComputeLabels(Recording);
+
+    private static (string TimeRange, string Duration) ComputeLabels(Recording recording)
+    {
+        var start = recording.StartTime.Kind == DateTimeKind.Utc
+            ? recording.StartTime.ToLocalTime()
+            : recording.StartTime;
+        var duration = recording.Duration ?? TimeSegment.EstimateDuration(recording);
+        var end = start + duration;
+        return ($"{start:HH:mm} – {end:HH:mm}", PlaybackViewModel.FormatDuration(duration));
+    }
 }
