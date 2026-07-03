@@ -108,17 +108,26 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         var previous = SelectedDevice?.DiskNumber;
         Devices.Clear();
 
+        var usbWithMedia = new List<DeviceItem>();
         foreach (var disk in DiskEnumerator.GetPhysicalDisks())
         {
-            var size = disk.SizeBytes is { } s ? $"{s / (1024.0 * 1024 * 1024):F1} GB" : "?";
-            Devices.Add(new DeviceItem(
+            var size = disk.SizeBytes is { } s ? $"{s / (1024.0 * 1024 * 1024):F1} GB" : "empty";
+            var item = new DeviceItem(
                 disk.DiskNumber,
                 $"#{disk.DiskNumber}  {disk.FriendlyName}  ({size}{(disk.IsUsb ? ", USB" : "")})",
-                disk.IsUsb));
+                disk.IsUsb);
+            Devices.Add(item);
+
+            // Multi-slot readers expose a disk per slot; empty slots report no size.
+            if (disk.IsUsb && disk.SizeBytes > 0)
+            {
+                usbWithMedia.Add(item);
+            }
         }
 
-        // Prefer re-selecting the same disk, else the first USB device (likely the card reader).
+        // Prefer re-selecting the same disk, else a USB device with media, else any USB device.
         SelectedDevice = Devices.FirstOrDefault(d => d.DiskNumber == previous)
+            ?? usbWithMedia.FirstOrDefault()
             ?? Devices.FirstOrDefault(d => d.IsUsb)
             ?? Devices.FirstOrDefault();
     }
