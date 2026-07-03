@@ -22,6 +22,15 @@
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="#EAEAEA" />
         </Style>
+        <!-- ComboBox faces/popups are light; the implicit light TextBlock style above leaks
+             into their templates, so item text must set a dark foreground explicitly. -->
+        <DataTemplate x:Key="DarkOnLightItem">
+            <TextBlock Text="{Binding}" Foreground="#1E1E24" />
+        </DataTemplate>
+        <Style TargetType="ComboBox">
+            <Setter Property="ItemTemplate" Value="{StaticResource DarkOnLightItem}" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
     </Window.Resources>
 
     <Grid>

@@ -15,8 +15,9 @@ namespace AxisSdReader.App.ViewModels;
 /// </summary>
 public sealed partial class PlayerViewModel : ObservableObject, IDisposable
 {
-    private readonly LibVLC _libVlc;
+    private readonly Task _initTask;
     private readonly Dispatcher _dispatcher;
+    private LibVLC? _libVlc;
 
     private OpenCard? _card;
     private Recording? _recording;
@@ -48,28 +49,43 @@ public sealed partial class PlayerViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private float _playbackRate = 1.0f;
 
-    public MediaPlayer MediaPlayer { get; }
+    /// <summary>Null until the LibVLC engine finishes initializing on a background thread
+    /// (first launch generates the libvlc plugin cache, which can take many seconds).</summary>
+    [ObservableProperty]
+    private MediaPlayer? _mediaPlayer;
 
     public float[] AvailableRates { get; } = [0.5f, 1.0f, 2.0f, 4.0f, 8.0f];
 
     public PlayerViewModel()
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
-        _libVlc = new LibVLC("--no-osd");
-        MediaPlayer = new MediaPlayer(_libVlc) { EnableHardwareDecoding = true };
+        _initTask = Task.Run(InitializeEngine);
+    }
+
+    private void InitializeEngine()
+    {
+        var libVlc = new LibVLC("--no-osd");
+        var player = new MediaPlayer(libVlc) { EnableHardwareDecoding = true };
 
         // VLC events arrive on VLC threads: never call back into libvlc from the handler
         // itself, marshal to the UI thread first.
-        MediaPlayer.TimeChanged += (_, e) => _dispatcher.BeginInvoke(() => OnTimeChanged(e.Time));
-        MediaPlayer.EndReached += (_, _) => _dispatcher.BeginInvoke(OnChunkEnded);
-        MediaPlayer.Playing += (_, _) => _dispatcher.BeginInvoke(() => IsPlaying = true);
-        MediaPlayer.Paused += (_, _) => _dispatcher.BeginInvoke(() => IsPlaying = false);
-        MediaPlayer.Stopped += (_, _) => _dispatcher.BeginInvoke(() => IsPlaying = false);
+        player.TimeChanged += (_, e) => _dispatcher.BeginInvoke(() => OnTimeChanged(e.Time));
+        player.EndReached += (_, _) => _dispatcher.BeginInvoke(OnChunkEnded);
+        player.Playing += (_, _) => _dispatcher.BeginInvoke(() => IsPlaying = true);
+        player.Paused += (_, _) => _dispatcher.BeginInvoke(() => IsPlaying = false);
+        player.Stopped += (_, _) => _dispatcher.BeginInvoke(() => IsPlaying = false);
+
+        _dispatcher.Invoke(() =>
+        {
+            _libVlc = libVlc;
+            MediaPlayer = player; // VideoView picks this up through the binding
+        });
     }
 
     /// <summary>Loads a recording whose chunk metadata is already populated.</summary>
-    public void Load(OpenCard card, Recording recording)
+    public async Task Load(OpenCard card, Recording recording)
     {
+        await _initTask; // engine ready (no-op after first use)
         Stop();
 
         _card = card;
@@ -82,7 +98,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IDisposable
         for (var i = 0; i < recording.Chunks.Count; i++)
         {
             _chunkStarts[i] = cursor;
-            cursor += recording.Chunks[i].Metadata?.Duration ?? TimeSpan.Zero;
+            cursor += recording.Chunks[i].Duration ?? TimeSpan.Zero;
         }
 
         SessionLengthSeconds = Math.Max(1, cursor.TotalSeconds);
@@ -100,7 +116,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void PlayPause()
     {
-        if (_recording is null)
+        if (_recording is null || MediaPlayer is null)
         {
             return;
         }
@@ -122,7 +138,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void Stop()
     {
-        MediaPlayer.Stop();
+        MediaPlayer?.Stop();
         DisposeCurrentMedia();
         _currentChunk = -1;
         IsPlaying = false;
@@ -141,7 +157,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IDisposable
         var chunk = FindChunkAt(target);
         var offset = target - _chunkStarts[chunk];
 
-        if (chunk == _currentChunk && _currentMedia is not null)
+        if (chunk == _currentChunk && _currentMedia is not null && MediaPlayer is not null)
         {
             MediaPlayer.Time = (long)offset.TotalMilliseconds;
         }
@@ -151,7 +167,7 @@ public sealed partial class PlayerViewModel : ObservableObject, IDisposable
         }
     }
 
-    partial void OnPlaybackRateChanged(float value) => MediaPlayer.SetRate(value);
+    partial void OnPlaybackRateChanged(float value) => MediaPlayer?.SetRate(value);
 
     private int FindChunkAt(TimeSpan position)
     {
@@ -168,7 +184,8 @@ public sealed partial class PlayerViewModel : ObservableObject, IDisposable
 
     private void PlayChunk(int index, TimeSpan offset)
     {
-        if (_card is null || _recording is null || index < 0 || index >= _recording.Chunks.Count)
+        if (_card is null || _recording is null || MediaPlayer is null || _libVlc is null ||
+            index < 0 || index >= _recording.Chunks.Count)
         {
             return;
         }
@@ -241,9 +258,9 @@ public sealed partial class PlayerViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
-        MediaPlayer.Stop();
+        MediaPlayer?.Stop();
         DisposeCurrentMedia();
-        MediaPlayer.Dispose();
-        _libVlc.Dispose();
+        MediaPlayer?.Dispose();
+        _libVlc?.Dispose();
     }
 }

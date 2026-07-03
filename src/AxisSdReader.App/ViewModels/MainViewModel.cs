@@ -97,19 +97,23 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         _watcher = new DeviceWatcher();
-        _watcher.DiskArrived += _ => _dispatcher.BeginInvoke(RefreshDevices);
-        _watcher.DiskRemoved += _ => _dispatcher.BeginInvoke(RefreshDevices);
-        RefreshDevices();
+        _watcher.DiskArrived += devicePath => _dispatcher.BeginInvoke(() => { _ = RefreshDevices(); });
+        _watcher.DiskRemoved += devicePath => _dispatcher.BeginInvoke(() => { _ = RefreshDevices(); });
+        _ = RefreshDevices();
     }
 
     [RelayCommand]
-    private void RefreshDevices()
+    private async Task RefreshDevices()
     {
+        // Enumeration issues IOCTLs per disk/volume; empty card-reader slots can take a
+        // moment to answer, so keep it off the UI thread.
+        var disks = await Task.Run(DiskEnumerator.GetPhysicalDisks);
+
         var previous = SelectedDevice?.DiskNumber;
         Devices.Clear();
 
         var usbWithMedia = new List<DeviceItem>();
-        foreach (var disk in DiskEnumerator.GetPhysicalDisks())
+        foreach (var disk in disks)
         {
             var size = disk.SizeBytes is { } s ? $"{s / (1024.0 * 1024 * 1024):F1} GB" : "empty";
             var item = new DeviceItem(
@@ -310,7 +314,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             await _card.LoadMetadataAsync(item.Recording);
             item.RefreshDetails();
-            Player.Load(_card, item.Recording);
+            await Player.Load(_card, item.Recording);
         }
         catch (Exception ex)
         {
