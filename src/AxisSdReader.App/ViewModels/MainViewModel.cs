@@ -34,7 +34,9 @@ public sealed partial class RecordingItem : ObservableObject
 
     public Recording Recording { get; }
 
-    public string DisplayName => Recording.StartTime.ToString("yyyy-MM-dd HH:mm:ss");
+    public string DisplayName =>
+        (Recording.StartTime.Kind == DateTimeKind.Utc ? Recording.StartTime.ToLocalTime() : Recording.StartTime)
+        .ToString("yyyy-MM-dd HH:mm:ss");
 
     [ObservableProperty]
     private string _details;
@@ -46,10 +48,12 @@ public sealed partial class RecordingItem : ObservableObject
         {
             "V_MPEG4/ISO/AVC" => " · H.264",
             "V_MPEGH/ISO/HEVC" => " · H.265",
+            "V_AV1" => " · AV1",
             null => "",
             var other => $" · {other}",
         };
-        Details = $"{Recording.Chunks.Count} chunks · {Recording.TotalSizeBytes / (1024.0 * 1024):F0} MB{duration}{codec}";
+        var interrupted = Recording.WasInterrupted ? " · interrupted" : "";
+        Details = $"{Recording.Chunks.Count} chunks · {Recording.TotalSizeBytes / (1024.0 * 1024):F0} MB{duration}{codec}{interrupted}";
     }
 }
 

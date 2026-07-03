@@ -4,8 +4,9 @@ namespace AxisSdReader.Core.Tests.Fixtures;
 
 /// <summary>
 /// Generates (once per test run) an Axis-like ext4 card image by invoking
-/// tools/make-fixture.sh under WSL. The image is cached in tests/fixtures/ and
-/// only regenerated when missing, so normal runs are fast.
+/// tools/make-fixture.sh under WSL. The image is cached in tests/fixtures/ and only
+/// regenerated when missing. Shared across all test classes via a collection fixture;
+/// a named mutex additionally guards against concurrent test processes.
 /// </summary>
 public sealed class CardImageFixture
 {
@@ -13,14 +14,23 @@ public sealed class CardImageFixture
     {
         var repoRoot = FindRepoRoot();
         // Bump the version suffix whenever make-fixture.sh changes, to invalidate cached images.
-        ImagePath = Path.Combine(repoRoot, "tests", "fixtures", "axis-card-v2.img");
+        ImagePath = Path.Combine(repoRoot, "tests", "fixtures", "axis-card-v3.img");
 
-        if (!File.Exists(ImagePath))
+        using var mutex = new Mutex(initiallyOwned: false, "Global\\AxisSdReaderFixtureGen");
+        mutex.WaitOne(TimeSpan.FromMinutes(5));
+        try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(ImagePath)!);
-            var script = ToWslPath(Path.Combine(repoRoot, "tools", "make-fixture.sh"));
-            var output = ToWslPath(ImagePath);
-            RunWsl($"bash '{script}' '{output}'");
+            if (!File.Exists(ImagePath))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(ImagePath)!);
+                var script = ToWslPath(Path.Combine(repoRoot, "tools", "make-fixture.sh"));
+                var output = ToWslPath(ImagePath);
+                RunWsl($"bash '{script}' '{output}'");
+            }
+        }
+        finally
+        {
+            mutex.ReleaseMutex();
         }
     }
 
@@ -66,3 +76,7 @@ public sealed class CardImageFixture
         }
     }
 }
+
+/// <summary>All card-image test classes share one fixture instance via this collection.</summary>
+[CollectionDefinition("CardImage")]
+public sealed class CardImageCollection : ICollectionFixture<CardImageFixture>;

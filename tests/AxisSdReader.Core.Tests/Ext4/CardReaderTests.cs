@@ -4,7 +4,8 @@ using AxisSdReader.Core.Tests.Fixtures;
 
 namespace AxisSdReader.Core.Tests.Ext4;
 
-public class CardReaderTests : IClassFixture<CardImageFixture>
+[Collection("CardImage")]
+public class CardReaderTests
 {
     private const long BigFileSize = 5L * 1024 * 1024 * 1024;
 
@@ -28,7 +29,7 @@ public class CardReaderTests : IClassFixture<CardImageFixture>
     }
 
     [Fact]
-    public void ListsRecordingDirectoriesAtRoot()
+    public void ListsRootDirectories()
     {
         using var card = CardReader.OpenImage(_fixture.ImagePath);
         var fs = card.FileSystem!;
@@ -41,9 +42,13 @@ public class CardReaderTests : IClassFixture<CardImageFixture>
 
         Assert.Equal(
             [
-                "20250114_093000_1A2B_ACCC8E123456",
-                "20250114_101500_77F0_ACCC8E123456",
+                "20250114",
                 "20250302_180000_0C3D_B8A44F998877",
+                "areas",
+                "music",
+                "osr",
+                "recording_groups",
+                "ws",
             ],
             dirs);
 
@@ -57,7 +62,7 @@ public class CardReaderTests : IClassFixture<CardImageFixture>
         using var card = CardReader.OpenImage(_fixture.ImagePath);
         var fs = card.FileSystem!;
 
-        var path = @"\20250114_093000_1A2B_ACCC8E123456\0.mkv";
+        var path = @"\20250114\09\20250114_093000_1A2B_ACCC8E123456\20250114_09\20250114_093000_5B35.mkv";
         Assert.True(fs.FileExists(path));
         Assert.True(fs.GetFileLength(path) > 1024);
 

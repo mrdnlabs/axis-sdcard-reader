@@ -6,7 +6,8 @@ using AxisSdReader.Core.Tests.Fixtures;
 
 namespace AxisSdReader.Core.Tests.Export;
 
-public class RecordingExporterTests : IClassFixture<CardImageFixture>
+[Collection("CardImage")]
+public class RecordingExporterTests
 {
     private readonly CardImageFixture _fixture;
 

@@ -21,4 +21,5 @@ public sealed record MkvMetadata(
 {
     public bool IsH264 => VideoCodecId == "V_MPEG4/ISO/AVC";
     public bool IsH265 => VideoCodecId == "V_MPEGH/ISO/HEVC";
+    public bool IsAv1 => VideoCodecId == "V_AV1";
 }

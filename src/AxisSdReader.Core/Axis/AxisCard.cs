@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AxisSdReader.Core.Axis.Matroska;
 using DiscUtils;
 
@@ -6,8 +7,20 @@ namespace AxisSdReader.Core.Axis;
 /// <summary>One MKV chunk file within a recording.</summary>
 public sealed record RecordingChunk(string Path, string FileName, long SizeBytes)
 {
-    /// <summary>Header metadata; populated by <see cref="Recording.LoadChunkMetadata"/>.</summary>
+    /// <summary>Sidecar XML path (same basename, .xml) if one exists on the card.</summary>
+    public string? SidecarPath { get; init; }
+
+    /// <summary>Parsed sidecar block info; populated by <see cref="Recording.LoadChunkMetadata"/>.</summary>
+    public RecordingBlockXml? Block { get; init; }
+
+    /// <summary>MKV header metadata; populated when the sidecar alone is not sufficient.</summary>
     public MkvMetadata? Metadata { get; init; }
+
+    /// <summary>Best-known duration: sidecar start/stop first, then MKV headers.</summary>
+    public TimeSpan? Duration => Block?.Duration ?? Metadata?.Duration;
+
+    /// <summary>Best-known UTC start time: sidecar first, then MKV DateUTC.</summary>
+    public DateTime? StartTimeUtc => Block?.StartTimeUtc ?? Metadata?.DateUtc;
 }
 
 /// <summary>
@@ -15,24 +28,36 @@ public sealed record RecordingChunk(string Path, string FileName, long SizeBytes
 /// </summary>
 public sealed class Recording
 {
-    public Recording(RecordingId id, string directoryPath, IReadOnlyList<RecordingChunk> chunks)
+    public Recording(RecordingId id, string directoryPath, IReadOnlyList<RecordingChunk> chunks, RecordingInfoXml? info)
     {
         Id = id;
         DirectoryPath = directoryPath;
         Chunks = chunks;
+        Info = info;
     }
 
     public RecordingId Id { get; }
 
     public string DirectoryPath { get; }
 
+    /// <summary>Camera-written recording.xml metadata (UTC start, trigger, codec/resolution), if present.</summary>
+    public RecordingInfoXml? Info { get; }
+
     /// <summary>Chunks in playback order.</summary>
     public IReadOnlyList<RecordingChunk> Chunks { get; private set; }
 
     public long TotalSizeBytes => Chunks.Sum(c => c.SizeBytes);
 
-    /// <summary>Start time from the recording ID (camera clock).</summary>
-    public DateTime StartTime => Id.StartTime;
+    /// <summary>UTC start time when known (recording.xml), else the camera-local time from the folder name.</summary>
+    public DateTime StartTime => Info?.StartTimeUtc ?? Id.StartTime;
+
+    /// <summary>Trigger that started the recording (e.g. "continuous"), when recorded by the camera.</summary>
+    public string? Trigger => Info?.TriggerType ?? Info?.TriggerName;
+
+    /// <summary>True when the last chunk was still being written when the card was removed.</summary>
+    public bool WasInterrupted =>
+        Chunks.Count > 0 &&
+        (Chunks[^1].Block is { IsComplete: false } || Chunks[^1].Metadata?.IsTruncated == true);
 
     /// <summary>Total duration across chunks; null until metadata is loaded or when no chunk reports one.</summary>
     public TimeSpan? Duration
@@ -42,7 +67,7 @@ public sealed class Recording
             TimeSpan? total = null;
             foreach (var chunk in Chunks)
             {
-                if (chunk.Metadata?.Duration is { } d)
+                if (chunk.Duration is { } d)
                 {
                     total = (total ?? TimeSpan.Zero) + d;
                 }
@@ -52,25 +77,42 @@ public sealed class Recording
         }
     }
 
-    /// <summary>Codec of the first chunk that reported one (chunks of a session share encoding).</summary>
-    public string? VideoCodecId => Chunks.Select(c => c.Metadata?.VideoCodecId).FirstOrDefault(c => c is not null);
+    /// <summary>Matroska codec ID, from recording.xml encoding or the first chunk that reported one.</summary>
+    public string? VideoCodecId => Info?.Encoding switch
+    {
+        "video/x-av1" => "V_AV1",
+        "video/x-h264" or "video/h264" => "V_MPEG4/ISO/AVC",
+        "video/x-h265" or "video/h265" or "video/x-hevc" => "V_MPEGH/ISO/HEVC",
+        _ => Chunks.Select(c => c.Metadata?.VideoCodecId).FirstOrDefault(c => c is not null),
+    };
 
     /// <summary>
-    /// Reads the MKV headers of every chunk (cheap: header-sized reads, plus a structural
-    /// walk when a chunk lacks a Duration element). Idempotent.
+    /// Loads per-chunk timing metadata. Sidecar XMLs are preferred (two tiny reads per chunk);
+    /// MKV headers are only parsed for chunks the sidecar cannot fully describe (no stop time —
+    /// i.e. interrupted while recording). Idempotent.
     /// </summary>
     public void LoadChunkMetadata(DiscFileSystem fileSystem)
     {
         Chunks = Chunks
             .Select(chunk =>
             {
-                if (chunk.Metadata is not null)
+                if (chunk.Block is not null || chunk.Metadata is not null)
                 {
                     return chunk;
                 }
 
-                using var stream = fileSystem.OpenFile(chunk.Path, FileMode.Open, FileAccess.Read);
-                return chunk with { Metadata = MkvMetadataReader.Read(stream) };
+                var block = chunk.SidecarPath is { } sidecar
+                    ? RecordingXml.TryParseBlock(fileSystem, sidecar)
+                    : null;
+
+                MkvMetadata? metadata = null;
+                if (block?.Duration is null)
+                {
+                    using var stream = fileSystem.OpenFile(chunk.Path, FileMode.Open, FileAccess.Read);
+                    metadata = MkvMetadataReader.Read(stream);
+                }
+
+                return chunk with { Block = block, Metadata = metadata };
             })
             .ToList();
     }
@@ -104,7 +146,7 @@ public sealed class AxisCard
     /// <summary>Recordings grouped by camera serial.</summary>
     public IReadOnlyList<CameraInfo> Cameras { get; }
 
-    /// <summary>Root directories/files that did not match the Axis layout (excluding lost+found).</summary>
+    /// <summary>Root directories/files that are not part of the recording layout (excluding lost+found).</summary>
     public IReadOnlyList<string> UnrecognizedRootEntries { get; }
 
     /// <summary>Whether the proprietary Axis index database was present at the card root.</summary>
@@ -114,9 +156,18 @@ public sealed class AxisCard
 /// <summary>Builds an <see cref="AxisCard"/> model from a card's filesystem.</summary>
 public static class AxisCardIndexer
 {
+    // Two known on-card layouts:
+    //   legacy/flat:  \<recordingId>\*.mkv
+    //   AXIS OS 10+:  \<YYYYMMDD>\<HH>\<recordingId>\<YYYYMMDD_HH>\<timestamp>.mkv (+ .xml sidecars,
+    //                 recording.xml in the recording dir)
+    // Discovery descends only through date/hour-shaped directories, so unrelated card content
+    // (ACAP application data etc.) is never scanned.
+    private static readonly Regex DateDir = new(@"^\d{8}$", RegexOptions.Compiled);
+    private static readonly Regex HourDir = new(@"^\d{1,2}$", RegexOptions.Compiled);
+
     /// <summary>
-    /// Indexes the card from directory names alone (fast — no file contents are read).
-    /// Call <see cref="Recording.LoadChunkMetadata"/> per recording for durations/codecs.
+    /// Indexes the card from directory/file names plus one small recording.xml read per
+    /// recording. Call <see cref="Recording.LoadChunkMetadata"/> per recording for durations.
     /// </summary>
     public static AxisCard Index(DiscFileSystem fileSystem)
     {
@@ -125,26 +176,38 @@ public static class AxisCardIndexer
 
         foreach (var directory in fileSystem.GetDirectories(@"\"))
         {
-            var name = directory.TrimStart('\\');
+            var name = DirName(directory);
             if (name is "lost+found")
             {
                 continue;
             }
 
-            var id = RecordingId.TryParse(name);
-            if (id is null)
+            if (RecordingId.TryParse(name) is { } flatId)
+            {
+                recordings.Add(BuildRecording(fileSystem, flatId, directory));
+            }
+            else if (DateDir.IsMatch(name))
+            {
+                foreach (var hourDir in fileSystem.GetDirectories(directory))
+                {
+                    if (!HourDir.IsMatch(DirName(hourDir)))
+                    {
+                        continue;
+                    }
+
+                    foreach (var recordingDir in fileSystem.GetDirectories(hourDir))
+                    {
+                        if (RecordingId.TryParse(DirName(recordingDir)) is { } id)
+                        {
+                            recordings.Add(BuildRecording(fileSystem, id, recordingDir));
+                        }
+                    }
+                }
+            }
+            else
             {
                 unrecognized.Add(name);
-                continue;
             }
-
-            var chunks = fileSystem.GetFiles(directory)
-                .Where(f => f.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase))
-                .Select(f => new RecordingChunk(f, System.IO.Path.GetFileName(f), fileSystem.GetFileLength(f)))
-                .OrderBy(c => c.FileName, ChunkNameComparer.Instance)
-                .ToList();
-
-            recordings.Add(new Recording(id, directory, chunks));
         }
 
         var hasIndexDb = fileSystem.GetFiles(@"\")
@@ -160,24 +223,55 @@ public static class AxisCardIndexer
             hasIndexDb);
     }
 
-    /// <summary>Orders chunk file names numerically when possible (0.mkv, 1.mkv, ..., 10.mkv), lexically otherwise.</summary>
-    private sealed class ChunkNameComparer : IComparer<string>
+    private static Recording BuildRecording(DiscFileSystem fs, RecordingId id, string recordingDir)
     {
-        public static readonly ChunkNameComparer Instance = new();
+        // Chunks live either directly in the recording dir (legacy) or in hour-bucket
+        // subdirectories (YYYYMMDD_HH). Collect both.
+        var chunkDirs = new List<string> { recordingDir };
+        chunkDirs.AddRange(fs.GetDirectories(recordingDir));
 
-        public int Compare(string? x, string? y)
+        var chunks = new List<RecordingChunk>();
+        foreach (var dir in chunkDirs)
         {
-            var nx = TryNumeric(x);
-            var ny = TryNumeric(y);
-            if (nx is not null && ny is not null)
+            foreach (var file in fs.GetFiles(dir))
             {
-                return nx.Value.CompareTo(ny.Value);
-            }
+                if (!file.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
 
-            return string.CompareOrdinal(x, y);
+                var sidecar = file[..^4] + ".xml";
+                chunks.Add(new RecordingChunk(file, System.IO.Path.GetFileName(file), fs.GetFileLength(file))
+                {
+                    SidecarPath = fs.FileExists(sidecar) ? sidecar : null,
+                });
+            }
         }
 
-        private static long? TryNumeric(string? name) =>
-            long.TryParse(System.IO.Path.GetFileNameWithoutExtension(name), out var n) ? n : null;
+        chunks.Sort((a, b) => CompareChunkNames(a.FileName, b.FileName));
+
+        var infoPath = recordingDir.TrimEnd('\\') + @"\recording.xml";
+        var info = RecordingXml.TryParseRecordingInfo(fs, infoPath);
+
+        return new Recording(id, recordingDir, chunks, info);
     }
+
+    /// <summary>Orders chunk names numerically when both are plain numbers (legacy 0.mkv, 1.mkv,
+    /// ..., 10.mkv), lexically otherwise (timestamped names sort correctly as text).</summary>
+    private static int CompareChunkNames(string x, string y)
+    {
+        var nx = TryNumeric(x);
+        var ny = TryNumeric(y);
+        if (nx is not null && ny is not null)
+        {
+            return nx.Value.CompareTo(ny.Value);
+        }
+
+        return string.CompareOrdinal(x, y);
+    }
+
+    private static long? TryNumeric(string name) =>
+        long.TryParse(System.IO.Path.GetFileNameWithoutExtension(name), out var n) ? n : null;
+
+    private static string DirName(string path) => System.IO.Path.GetFileName(path.TrimEnd('\\'));
 }

@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# Generates an Axis-like ext4 SD card image for tests.
+# Generates an Axis-like ext4 SD card image for tests, mirroring the layout observed on a
+# real card written by an AXIS P3288-LVE (AXIS OS 12.x, July 2026):
+#
+#   /<YYYYMMDD>/<HH>/<recordingId>/recording.xml
+#   /<YYYYMMDD>/<HH>/<recordingId>/<YYYYMMDD_HH>/<YYYYMMDD_HHMMSS_XXXX>.mkv (+ .xml sidecar)
+#   /index.db, /recording_groups/recording_groups.conf, ACAP dirs (areas/, ws/, ...)
+#
+# plus one legacy flat-layout recording (recording dir at card root).
+#
 # Runs under Linux/WSL; requires sfdisk, mke2fs (e2fsprogs) and ffmpeg, no root needed.
 #
 # Usage: make-fixture.sh <output.img> [fs_size_mb]
@@ -14,44 +22,78 @@ command -v ffmpeg >/dev/null || { echo "ffmpeg is required" >&2; exit 1; }
 ROOT=$(mktemp -d)
 trap 'rm -rf "$ROOT"' EXIT
 
-# Tiny real H.264 MKV chunk. $1=path $2=creation_time (Matroska DateUTC)
+# Tiny real MKV chunk. $1=path $2=creation_time $3=codec (libx264|libaom-av1)
 mkv() {
+  local codec_args=(-c:v libx264 -preset ultrafast)
+  if [ "${3:-}" = av1 ]; then
+    codec_args=(-c:v libaom-av1 -crf 50 -b:v 0 -cpu-used 8 -row-mt 1)
+  fi
   ffmpeg -loglevel error -y -f lavfi -i "testsrc=duration=2:size=320x240:rate=10" \
-    -c:v libx264 -preset ultrafast -metadata creation_time="$2" "$1"
+    "${codec_args[@]}" -metadata creation_time="$2" "$1"
 }
 
 # Live-muxed variant: piped output means ffmpeg cannot seek back, so the header has
-# no Duration element and the segment size is unknown - like camera edge storage.
+# no (or a zero) Duration element and the segment size is unknown - like camera output.
 mkv_live() {
   ffmpeg -loglevel error -y -f lavfi -i "testsrc=duration=2:size=320x240:rate=10" \
     -c:v libx264 -preset ultrafast -metadata creation_time="$2" -f matroska - > "$1"
 }
 
-# --- Axis-like content -------------------------------------------------------
-# Recording directories: YYYYMMDD_HHMMSS_<4hex>_<cameraMAC>, containing MKV chunks.
+# Sidecar RecordingBlock XML. $1=path $2=token $3=recToken $4=start $5=stop(empty=Recording)
+block_xml() {
+  if [ -n "$5" ]; then
+    printf '<RecordingBlock RecordingBlockToken="%s" ><RecordingToken>%s</RecordingToken><StartTime>%s</StartTime><StopTime>%s</StopTime><Status>Complete</Status></RecordingBlock>' \
+      "$2" "$3" "$4" "$5" > "$1"
+  else
+    printf '<RecordingBlock RecordingBlockToken="%s" ><RecordingToken>%s</RecordingToken><StartTime>%s</StartTime><Status>Recording</Status></RecordingBlock>' \
+      "$2" "$3" "$4" > "$1"
+  fi
+}
 
-R1="$ROOT/20250114_093000_1A2B_ACCC8E123456"
-mkdir -p "$R1"
-mkv "$R1/0.mkv" "2025-01-14T09:30:00Z"
-mkv "$R1/1.mkv" "2025-01-14T09:30:02Z"
-mkv "$R1/2.mkv" "2025-01-14T09:30:04Z"
+# recording.xml. $1=path $2=token $3=start $4=encoding $5=trigger
+recording_xml() {
+  printf '<Recording RecordingToken="%s" ><RecordingGroup> </RecordingGroup><SourceToken>1</SourceToken><StartTime>%s</StartTime><Content></Content><Track TrackToken="Video"><VideoAttributes>  <Width>320</Width>  <Height>240</Height>  <Framerate>10.00000</Framerate>  <Framerate_fraction>10:1</Framerate_fraction>  <Encoding>%s</Encoding>  <Bitrate>0</Bitrate></VideoAttributes></Track><Application>AxisCamera</Application><CustomAttributes>  <TriggerTrigger>%s</TriggerTrigger>  <TriggerName>%s</TriggerName>  <TriggerType>%s</TriggerType></CustomAttributes></Recording>' \
+    "$2" "$3" "$4" "$5" "$5" "$5" > "$1"
+}
 
-R2="$ROOT/20250114_101500_77F0_ACCC8E123456"
-mkdir -p "$R2"
-mkv      "$R2/0.mkv" "2025-01-14T10:15:00Z"
-mkv_live "$R2/1.mkv" "2025-01-14T10:15:02Z"
-# Truncated chunk: the first 60% of a live-muxed file, as after camera power loss.
-mkv_live "$R2/tmp_full.mkv" "2025-01-14T10:15:04Z"
-FULL_SIZE=$(stat -c %s "$R2/tmp_full.mkv")
-head -c $((FULL_SIZE * 60 / 100)) "$R2/tmp_full.mkv" > "$R2/2.mkv"
-rm "$R2/tmp_full.mkv"
+# --- modern nested layout (as on real cards) ----------------------------------
 
-# A recording whose only chunk is not a valid MKV at all (corrupt data).
-R3="$ROOT/20250302_180000_0C3D_B8A44F998877"
-mkdir -p "$R3"
-head -c 8192 /dev/urandom > "$R3/0.mkv"
+# Recording 1: H.264, three complete chunks with sidecars. Folder names are camera-local
+# time (09:30), XML times are UTC (14:30, camera at UTC-5).
+T1="20250114_093000_1A2B_ACCC8E123456"
+D1="$ROOT/20250114/09/$T1/20250114_09"
+mkdir -p "$D1"
+recording_xml "$ROOT/20250114/09/$T1/recording.xml" "$T1" "2025-01-14T14:30:00.000000Z" "video/x-h264" "continuous"
+mkv "$D1/20250114_093000_5B35.mkv" "2025-01-14T14:30:00Z"
+block_xml "$D1/20250114_093000_5B35.xml" "20250114_093000_5B35" "$T1" "2025-01-14T14:30:00.000000Z" "2025-01-14T14:30:02.000000Z"
+mkv "$D1/20250114_093002_9D2B.mkv" "2025-01-14T14:30:02Z"
+block_xml "$D1/20250114_093002_9D2B.xml" "20250114_093002_9D2B" "$T1" "2025-01-14T14:30:02.000000Z" "2025-01-14T14:30:04.000000Z"
+mkv "$D1/20250114_093004_84BA.mkv" "2025-01-14T14:30:04Z"
+block_xml "$D1/20250114_093004_84BA.xml" "20250114_093004_84BA" "$T1" "2025-01-14T14:30:04.000000Z" "2025-01-14T14:30:06.000000Z"
 
-# Stand-in for the proprietary index database at the card root.
+# Recording 2: AV1, one complete chunk and one mid-write chunk (truncated MKV, sidecar
+# without StopTime, Status=Recording) - as left behind when the card is pulled.
+T2="20250114_101500_77F0_ACCC8E123456"
+D2="$ROOT/20250114/10/$T2/20250114_10"
+mkdir -p "$D2"
+recording_xml "$ROOT/20250114/10/$T2/recording.xml" "$T2" "2025-01-14T15:15:00.000000Z" "video/x-av1" "continuous"
+mkv "$D2/20250114_101500_0001.mkv" "2025-01-14T15:15:00Z" av1
+block_xml "$D2/20250114_101500_0001.xml" "20250114_101500_0001" "$T2" "2025-01-14T15:15:00.000000Z" "2025-01-14T15:15:02.000000Z"
+mkv_live "$D2/tmp_full.mkv" "2025-01-14T15:15:02Z"
+FULL_SIZE=$(stat -c %s "$D2/tmp_full.mkv")
+head -c $((FULL_SIZE * 60 / 100)) "$D2/tmp_full.mkv" > "$D2/20250114_101502_0002.mkv"
+rm "$D2/tmp_full.mkv"
+block_xml "$D2/20250114_101502_0002.xml" "20250114_101502_0002" "$T2" "2025-01-14T15:15:02.000000Z" ""
+
+# --- legacy flat layout (recording dir at card root, numeric chunks, no sidecars) ----
+T3="20250302_180000_0C3D_B8A44F998877"
+mkdir -p "$ROOT/$T3"
+mkv "$ROOT/$T3/0.mkv" "2025-03-02T18:00:00Z"
+mkv "$ROOT/$T3/1.mkv" "2025-03-02T18:00:02Z"
+
+# --- other real-card furniture ------------------------------------------------
+mkdir -p "$ROOT/recording_groups" "$ROOT/areas/player" "$ROOT/ws/onvif/recording" "$ROOT/music" "$ROOT/osr"
+: > "$ROOT/recording_groups/recording_groups.conf"
 head -c 4096 /dev/urandom > "$ROOT/index.db"
 
 # Large sparse file (5 GiB logical) with a marker in its final 16 bytes:
@@ -74,7 +116,9 @@ label: dos
 start=$((PART_OFFSET / 512)), type=83
 EOF
 
-mke2fs -q -F -t ext4 -E offset=$PART_OFFSET -d "$ROOT" -L axis-sd "$IMG" "${FS_MB}m"
+mke2fs -q -F -t ext4 -E offset=$PART_OFFSET -d "$ROOT" -L Axis "$IMG" "${FS_MB}m"
 
-cp "$IMG" "$OUT"
+# Copy to a temp name first, then rename: concurrent invocations never see a partial file.
+cp "$IMG" "$OUT.tmp.$$"
+mv -f "$OUT.tmp.$$" "$OUT"
 echo "created $OUT"

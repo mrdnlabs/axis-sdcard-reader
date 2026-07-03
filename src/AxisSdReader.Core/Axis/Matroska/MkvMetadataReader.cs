@@ -180,10 +180,12 @@ public static class MkvMetadataReader
             truncated = true;
         }
 
-        TimeSpan? duration = durationTicks is { } d
+        TimeSpan? duration = durationTicks is { } d and > 0 && !double.IsNaN(d)
             ? TimeSpan.FromTicks((long)(d * timestampScale / 100.0))
             : null;
 
+        // No usable header duration (live-muxed files carry none, unfinalized camera files
+        // carry a 0 placeholder): derive one from the cluster/block timestamps.
         if (duration is null && scanClustersForDuration && firstClusterPosition is { } clusterStart)
         {
             var (scanned, scanTruncated) = ScanClustersForDuration(stream, clusterStart, timestampScale);
@@ -201,10 +203,12 @@ public static class MkvMetadataReader
     private static (TimeSpan? Duration, bool Truncated) ScanClustersForDuration(
         Stream stream, long firstClusterPosition, long timestampScale)
     {
+        // Single linear walk over all elements from the first cluster onward. Clusters are
+        // entered (not skipped) so this works for unknown-size clusters too — live muxers and
+        // cameras emit those, and their end is only implied by the next cluster starting.
         stream.Position = firstClusterPosition;
         long lastClusterTs = 0;
         long lastBlockRelativeTs = 0;
-        long? lastClusterEnd = null;
         var truncated = false;
 
         try
@@ -214,76 +218,65 @@ public static class MkvMetadataReader
                 var id = ReadElementId(stream);
                 if (id is null)
                 {
-                    break;
+                    break; // clean EOF
                 }
 
-                if (id != Cluster)
+                switch (id)
                 {
-                    if (SkipElement(stream) is null)
+                    case Cluster:
+                        ReadSize(stream); // enter the cluster; children follow linearly
+                        lastBlockRelativeTs = 0;
+                        break;
+                    case ClusterTimestamp:
+                        lastClusterTs = (long)(ReadUInt(stream) ?? 0);
+                        break;
+                    case SimpleBlock:
                     {
+                        var end = ElementEnd(stream);
+                        if (end > stream.Length)
+                        {
+                            truncated = true;
+                            goto done; // block payload cut off mid-write
+                        }
+
+                        var rel = ReadBlockRelativeTimestamp(stream);
+                        if (rel > lastBlockRelativeTs)
+                        {
+                            lastBlockRelativeTs = rel;
+                        }
+
+                        stream.Position = end;
                         break;
                     }
-
-                    continue;
-                }
-
-                var clusterEnd = ElementEnd(stream);
-                lastClusterEnd = clusterEnd;
-                lastBlockRelativeTs = 0;
-
-                while (stream.Position < clusterEnd && stream.Position < stream.Length &&
-                       ReadElementId(stream) is { } inner)
-                {
-                    switch (inner)
+                    case BlockGroup:
+                        ReadSize(stream); // enter; the contained Block is handled below
+                        break;
+                    case BlockElement:
                     {
-                        case ClusterTimestamp:
-                            lastClusterTs = (long)(ReadUInt(stream) ?? 0);
-                            break;
-                        case SimpleBlock:
+                        var end = ElementEnd(stream);
+                        if (end > stream.Length)
                         {
-                            var end = ElementEnd(stream);
-                            var rel = ReadBlockRelativeTimestamp(stream);
-                            if (rel > lastBlockRelativeTs)
-                            {
-                                lastBlockRelativeTs = rel;
-                            }
-
-                            stream.Position = end;
-                            break;
+                            truncated = true;
+                            goto done;
                         }
-                        case BlockGroup:
+
+                        var rel = ReadBlockRelativeTimestamp(stream);
+                        if (rel > lastBlockRelativeTs)
                         {
-                            var groupEnd = ElementEnd(stream);
-                            while (stream.Position < groupEnd && ReadElementId(stream) is { } groupInner)
-                            {
-                                if (groupInner == BlockElement)
-                                {
-                                    var end = ElementEnd(stream);
-                                    var rel = ReadBlockRelativeTimestamp(stream);
-                                    if (rel > lastBlockRelativeTs)
-                                    {
-                                        lastBlockRelativeTs = rel;
-                                    }
-
-                                    stream.Position = end;
-                                }
-                                else
-                                {
-                                    SkipElement(stream);
-                                }
-                            }
-
-                            break;
+                            lastBlockRelativeTs = rel;
                         }
-                        default:
-                            if (SkipElement(stream) is null)
-                            {
-                                truncated = true;
-                                goto done;
-                            }
 
-                            break;
+                        stream.Position = end;
+                        break;
                     }
+                    default:
+                        if (SkipElement(stream) is null)
+                        {
+                            truncated = true;
+                            goto done;
+                        }
+
+                        break;
                 }
             }
         }
@@ -293,11 +286,6 @@ public static class MkvMetadataReader
         }
 
         done:
-        if (lastClusterEnd is { } lce && lce > stream.Length)
-        {
-            truncated = true;
-        }
-
         var totalNs = (lastClusterTs + lastBlockRelativeTs) * timestampScale;
         return (totalNs > 0 ? TimeSpan.FromTicks(totalNs / 100) : null, truncated);
     }

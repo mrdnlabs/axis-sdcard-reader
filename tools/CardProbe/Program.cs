@@ -9,19 +9,42 @@ using AxisSdReader.Core.Ext4;
 //   CardProbe --disk N           guarded probe of physical disk N (run elevated)
 //   CardProbe --disk N --no-guard   ... without locking volumes (diagnostics only)
 //   CardProbe --image path.img   probe a card image file
+//
+// Extra operations (combinable, after --disk/--image):
+//   --tree [maxDepth]            recursive directory listing
+//   --dump <cardPath> <localPath>  copy a file off the card (repeatable)
 
 return args switch
 {
     [] => ListDisks(),
-    ["--disk", var n] when int.TryParse(n, out var disk) => ProbeDisk(disk, guard: true),
-    ["--disk", var n, "--no-guard"] when int.TryParse(n, out var disk) => ProbeDisk(disk, guard: false),
-    ["--image", var path] => ProbeImage(path),
+    ["--disk", var n, .. var rest] when int.TryParse(n, out var disk) => ProbeDisk(disk, rest),
+    ["--image", var path, .. var rest] => ProbeImage(path, rest),
+    ["--mkv", var path] => ProbeMkv(path),
     _ => Usage(),
 };
 
+static int ProbeMkv(string path)
+{
+    using var stream = File.OpenRead(path);
+    var meta = AxisSdReader.Core.Axis.Matroska.MkvMetadataReader.Read(stream);
+    if (meta is null)
+    {
+        Console.WriteLine("Not a Matroska file.");
+        return 1;
+    }
+
+    Console.WriteLine($"DateUtc:    {meta.DateUtc:O}");
+    Console.WriteLine($"Duration:   {meta.Duration}");
+    Console.WriteLine($"Codec:      {meta.VideoCodecId}");
+    Console.WriteLine($"Resolution: {meta.PixelWidth}x{meta.PixelHeight}");
+    Console.WriteLine($"WritingApp: {meta.WritingApp}");
+    Console.WriteLine($"Truncated:  {meta.IsTruncated}");
+    return 0;
+}
+
 static int Usage()
 {
-    Console.WriteLine("usage: CardProbe [--disk N [--no-guard] | --image path.img]");
+    Console.WriteLine("usage: CardProbe [--disk N [--no-guard] | --image path.img] [--tree [depth]] [--dump src dst]...");
     return 2;
 }
 
@@ -44,8 +67,9 @@ static int ListDisks()
     return 0;
 }
 
-static int ProbeDisk(int diskNumber, bool guard)
+static int ProbeDisk(int diskNumber, string[] options)
 {
+    var guard = !options.Contains("--no-guard");
     Console.WriteLine($"Opening physical disk {diskNumber} (guard={guard})...");
     var sw = Stopwatch.StartNew();
 
@@ -57,7 +81,8 @@ static int ProbeDisk(int diskNumber, bool guard)
             Console.WriteLine($"  [protect] {line}");
         }
 
-        return Report(session.Card, sw);
+        var result = Report(session.Card, sw);
+        return result != 0 ? result : RunExtraOps(session.Card, options);
     }
     catch (IOException ex)
     {
@@ -66,12 +91,79 @@ static int ProbeDisk(int diskNumber, bool guard)
     }
 }
 
-static int ProbeImage(string path)
+static int ProbeImage(string path, string[] options)
 {
     Console.WriteLine($"Opening image {path}...");
     var sw = Stopwatch.StartNew();
     using var card = CardReader.OpenImage(path);
-    return Report(card, sw);
+    var result = Report(card, sw);
+    return result != 0 ? result : RunExtraOps(card, options);
+}
+
+static int RunExtraOps(CardReader card, string[] options)
+{
+    var fs = card.FileSystem!;
+
+    for (var i = 0; i < options.Length; i++)
+    {
+        switch (options[i])
+        {
+            case "--tree":
+                var depth = i + 1 < options.Length && int.TryParse(options[i + 1], out var d) ? d : 5;
+                Console.WriteLine();
+                Console.WriteLine($"Tree (max depth {depth}):");
+                PrintTree(fs, @"\", depth, "");
+                break;
+
+            case "--dump" when i + 2 < options.Length:
+                var src = options[i + 1];
+                var dst = options[i + 2];
+                i += 2;
+                using (var source = fs.OpenFile(src, FileMode.Open, FileAccess.Read))
+                using (var target = File.Create(dst))
+                {
+                    source.CopyTo(target);
+                    Console.WriteLine($"Dumped {src} -> {dst} ({target.Length:N0} bytes)");
+                }
+
+                break;
+        }
+    }
+
+    return 0;
+}
+
+static void PrintTree(DiscUtils.DiscFileSystem fs, string path, int depthLeft, string indent)
+{
+    const int maxEntries = 25;
+
+    var files = fs.GetFiles(path).OrderBy(f => f).ToArray();
+    foreach (var file in files.Take(maxEntries))
+    {
+        Console.WriteLine($"{indent}{Path.GetFileName(file)}  {fs.GetFileLength(file):N0}");
+    }
+
+    if (files.Length > maxEntries)
+    {
+        Console.WriteLine($"{indent}... and {files.Length - maxEntries} more files");
+    }
+
+    if (depthLeft <= 0)
+    {
+        return;
+    }
+
+    foreach (var dir in fs.GetDirectories(path).OrderBy(d => d))
+    {
+        var name = Path.GetFileName(dir.TrimEnd('\\'));
+        if (name == "lost+found")
+        {
+            continue;
+        }
+
+        Console.WriteLine($"{indent}{name}/");
+        PrintTree(fs, dir, depthLeft - 1, indent + "    ");
+    }
 }
 
 static int Report(CardReader card, Stopwatch sw)
