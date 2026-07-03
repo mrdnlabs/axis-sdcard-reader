@@ -21,10 +21,11 @@ public class AxisCardTests
         using var reader = CardReader.OpenImage(_fixture.ImagePath);
         var card = AxisCardIndexer.Index(reader.FileSystem!);
 
-        Assert.Equal(3, card.Recordings.Count);
+        // 3 single-sensor recordings + 4 from the multi-sensor camera.
+        Assert.Equal(7, card.Recordings.Count);
         Assert.True(card.HasIndexDatabase);
 
-        Assert.Equal(2, card.Cameras.Count);
+        Assert.Equal(3, card.Cameras.Count);
         var cam1 = Assert.Single(card.Cameras, c => c.Serial == "ACCC8E123456");
         Assert.Equal(2, cam1.Recordings.Count);
 
@@ -145,5 +146,27 @@ public class AxisCardTests
         // Must degrade to null, not throw — an uncaught EndOfStreamException here crashed the
         // app while scrubbing into a recording with an odd chunk.
         Assert.Null(MkvMetadataReader.Read(stream));
+    }
+
+    [Fact]
+    public void MultiSensorCameraExposesPerSourceRecordings()
+    {
+        using var reader = CardReader.OpenImage(_fixture.ImagePath);
+        var card = AxisCardIndexer.Index(reader.FileSystem!);
+
+        // The 4-lens camera: one recording per VAPIX source, all under one serial. This is the
+        // data the app groups into lens tabs, so SourceToken must parse from the recording.xml.
+        var multi = Assert.Single(card.Cameras, c => c.Serial == "DD11EE22FF33");
+        var sources = multi.Recordings.Select(r => r.SourceToken).OrderBy(s => s).ToArray();
+        Assert.Equal(["1", "3", "4", "5"], sources);
+
+        // Grouping by source (what the app's lens builder does) yields four single-recording lenses.
+        var lenses = multi.Recordings.GroupBy(r => r.SourceToken).ToList();
+        Assert.Equal(4, lenses.Count);
+        Assert.All(lenses, g => Assert.Single(g));
+
+        // A single-sensor camera reports exactly one source, so it renders as no lens bar.
+        var single = Assert.Single(card.Cameras, c => c.Serial == "ACCC8E123456");
+        Assert.Single(single.Recordings.Select(r => r.SourceToken).Distinct());
     }
 }

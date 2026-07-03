@@ -43,6 +43,7 @@ public class CardReaderTests
         Assert.Equal(
             [
                 "20250114",
+                "20250115",
                 "20250302_180000_0C3D_B8A44F998877",
                 "areas",
                 "music",

@@ -14,7 +14,7 @@ public sealed class CardImageFixture
     {
         var repoRoot = FindRepoRoot();
         // Bump the version suffix whenever make-fixture.sh changes, to invalidate cached images.
-        ImagePath = Path.Combine(repoRoot, "tests", "fixtures", "axis-card-v3.img");
+        ImagePath = Path.Combine(repoRoot, "tests", "fixtures", "axis-card-v4.img");
 
         using var mutex = new Mutex(initiallyOwned: false, "Global\\AxisSdReaderFixtureGen");
         mutex.WaitOne(TimeSpan.FromMinutes(5));

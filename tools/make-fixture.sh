@@ -50,10 +50,11 @@ block_xml() {
   fi
 }
 
-# recording.xml. $1=path $2=token $3=start $4=encoding $5=trigger
+# recording.xml. $1=path $2=token $3=start $4=encoding $5=trigger $6=sourceToken(default 1)
 recording_xml() {
-  printf '<Recording RecordingToken="%s" ><RecordingGroup> </RecordingGroup><SourceToken>1</SourceToken><StartTime>%s</StartTime><Content></Content><Track TrackToken="Video"><VideoAttributes>  <Width>320</Width>  <Height>240</Height>  <Framerate>10.00000</Framerate>  <Framerate_fraction>10:1</Framerate_fraction>  <Encoding>%s</Encoding>  <Bitrate>0</Bitrate></VideoAttributes></Track><Application>AxisCamera</Application><CustomAttributes>  <TriggerTrigger>%s</TriggerTrigger>  <TriggerName>%s</TriggerName>  <TriggerType>%s</TriggerType></CustomAttributes></Recording>' \
-    "$2" "$3" "$4" "$5" "$5" "$5" > "$1"
+  local src="${6:-1}"
+  printf '<Recording RecordingToken="%s" ><RecordingGroup> </RecordingGroup><SourceToken>%s</SourceToken><StartTime>%s</StartTime><Content></Content><Track TrackToken="Video"><VideoAttributes>  <Width>320</Width>  <Height>240</Height>  <Framerate>10.00000</Framerate>  <Framerate_fraction>10:1</Framerate_fraction>  <Encoding>%s</Encoding>  <Bitrate>0</Bitrate></VideoAttributes></Track><Application>AxisCamera</Application><CustomAttributes>  <TriggerTrigger>%s</TriggerTrigger>  <TriggerName>%s</TriggerName>  <TriggerType>%s</TriggerType></CustomAttributes></Recording>' \
+    "$2" "$src" "$3" "$4" "$5" "$5" "$5" > "$1"
 }
 
 # --- modern nested layout (as on real cards) ----------------------------------
@@ -90,6 +91,20 @@ T3="20250302_180000_0C3D_B8A44F998877"
 mkdir -p "$ROOT/$T3"
 mkv "$ROOT/$T3/0.mkv" "2025-03-02T18:00:00Z"
 mkv "$ROOT/$T3/1.mkv" "2025-03-02T18:00:02Z"
+
+# --- multi-sensor camera (as a 4-lens unit records: one recording per VAPIX source,
+#     all starting together, distinguished by SourceToken). Serial DD11EE22FF33.
+multi_rec() {  # $1=recToken $2=sourceToken
+  local dir="$ROOT/20250115/12/$1/20250115_12"
+  mkdir -p "$dir"
+  recording_xml "$ROOT/20250115/12/$1/recording.xml" "$1" "2025-01-15T17:00:00.000000Z" "video/x-h264" "continuous" "$2"
+  mkv "$dir/$1_C0.mkv" "2025-01-15T17:00:00Z"
+  block_xml "$dir/$1_C0.xml" "${1}_C0" "$1" "2025-01-15T17:00:00.000000Z" "2025-01-15T17:00:02.000000Z"
+}
+multi_rec "20250115_120000_A1_DD11EE22FF33" "1"
+multi_rec "20250115_120000_A2_DD11EE22FF33" "3"
+multi_rec "20250115_120000_A3_DD11EE22FF33" "4"
+multi_rec "20250115_120000_A4_DD11EE22FF33" "5"
 
 # --- other real-card furniture ------------------------------------------------
 mkdir -p "$ROOT/recording_groups" "$ROOT/areas/player" "$ROOT/ws/onvif/recording" "$ROOT/music" "$ROOT/osr"
