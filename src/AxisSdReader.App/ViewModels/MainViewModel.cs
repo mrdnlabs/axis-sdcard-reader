@@ -438,6 +438,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 camera.Model = model;
             }
 
+            // Row labels (time ranges, durations) were built before durations were known.
+            RebuildRows();
+
             await Player.LoadDay(_card, camera.Name, camera.Model, date.Date, date.Recordings);
         }
         catch (Exception ex)
