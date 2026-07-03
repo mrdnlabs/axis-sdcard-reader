@@ -3,220 +3,846 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
+        xmlns:ctrl="clr-namespace:AxisSdReader.App.Controls"
         xmlns:vm="clr-namespace:AxisSdReader.App.ViewModels"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
-        Title="Axis SD Card Reader" Height="760" Width="1240" MinHeight="560" MinWidth="900"
-        Background="#1E1E24">
+        Title="Axis SD Card Reader" Height="900" Width="1440" MinHeight="640" MinWidth="1040"
+        WindowStyle="None" ResizeMode="CanResize" Background="#EEF0F3"
+        FontFamily="Segoe UI" TextOptions.TextFormattingMode="Display" UseLayoutRounding="True">
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="34" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
-        <Style TargetType="Button">
-            <Setter Property="Padding" Value="12,6" />
-            <Setter Property="Margin" Value="4,0" />
-            <Setter Property="Background" Value="#33353F" />
-            <Setter Property="Foreground" Value="#EAEAEA" />
-            <Setter Property="BorderBrush" Value="#4A4D5A" />
-        </Style>
-        <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#EAEAEA" />
-        </Style>
-        <Style TargetType="CheckBox">
-            <Setter Property="Foreground" Value="#EAEAEA" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
-        <!-- Dark-themed ComboBox: WPF's default light chrome looks disabled ("greyed out")
-             against the dark window, so the face and popup are templated explicitly. -->
-        <Style TargetType="ComboBoxItem">
-            <Setter Property="Foreground" Value="#EAEAEA" />
+
+        <!-- Caption buttons -->
+        <Style x:Key="CaptionButton" TargetType="Button">
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Foreground" Value="#5B6470" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True" />
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="ComboBoxItem">
-                        <Border x:Name="Bd" Background="Transparent" Padding="10,6">
-                            <ContentPresenter />
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsHighlighted" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#3D4152" />
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#E9EBEF" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
-        <Style TargetType="ComboBox">
-            <Setter Property="Foreground" Value="#EAEAEA" />
-            <Setter Property="Background" Value="#33353F" />
-            <Setter Property="BorderBrush" Value="#4A4D5A" />
-            <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Style x:Key="CloseCaptionButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="White" />
+                </Trigger>
+            </Style.Triggers>
             <Setter Property="Template">
                 <Setter.Value>
-                    <ControlTemplate TargetType="ComboBox">
-                        <Grid>
-                            <ToggleButton Focusable="False" ClickMode="Press"
-                                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
-                                <ToggleButton.Template>
-                                    <ControlTemplate TargetType="ToggleButton">
-                                        <Border Background="{Binding Background, RelativeSource={RelativeSource AncestorType=ComboBox}}"
-                                                BorderBrush="{Binding BorderBrush, RelativeSource={RelativeSource AncestorType=ComboBox}}"
-                                                BorderThickness="1" CornerRadius="3">
-                                            <Path HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0"
-                                                  Data="M0,0 L4,4 8,0" Stroke="#9AA0B4" StrokeThickness="1.5" />
-                                        </Border>
-                                    </ControlTemplate>
-                                </ToggleButton.Template>
-                            </ToggleButton>
-                            <ContentPresenter Margin="10,0,26,0" VerticalAlignment="Center" IsHitTestVisible="False"
-                                              Content="{TemplateBinding SelectionBoxItem}"
-                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
-                                              TextBlock.Foreground="#EAEAEA" />
-                            <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom"
-                                   AllowsTransparency="True" StaysOpen="False">
-                                <Border Background="#26272E" BorderBrush="#4A4D5A" BorderThickness="1" CornerRadius="3"
-                                        MinWidth="{TemplateBinding ActualWidth}" MaxHeight="320" Margin="0,2,0,0">
-                                    <ScrollViewer>
-                                        <ItemsPresenter />
-                                    </ScrollViewer>
-                                </Border>
-                            </Popup>
-                        </Grid>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#E81123" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- Round transport button (prev/next/mute) -->
+        <Style x:Key="RoundButton" TargetType="Button">
+            <Setter Property="Width" Value="38" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Background" Value="#F7F8FA" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="9"
+                                BorderBrush="#E2E7EF" BorderThickness="1">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#EEF1F6" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Toolbar text/icon button -->
+        <Style x:Key="ToolbarButton" TargetType="Button">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="#3A4048" />
+            <Setter Property="Background" Value="#F4F6F9" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="8"
+                                BorderBrush="#E2E7EF" BorderThickness="1" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#EEF1F6" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Sidebar tree row templates (implicit by type) -->
+        <DataTemplate DataType="{x:Type vm:CameraRow}">
+            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="34">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" Background="Transparent" CornerRadius="7" Padding="8,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Path x:Name="Caret" Grid.Column="0" Width="6" Height="8" Margin="0,0,9,0"
+                                      VerticalAlignment="Center" Fill="#9AA3AE" Data="M0,0 L6,4 L0,8 Z"
+                                      RenderTransformOrigin="0.4,0.5" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock x:Name="Name" Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
+                                               Foreground="#28303A" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Model}" FontSize="11" Foreground="#96A0AB"
+                                               TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <Border Grid.Column="2" Background="#EEF1F5" CornerRadius="10" Padding="8,1" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Badge}" FontSize="11" Foreground="#96A0AB" />
+                                </Border>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#EEF1F5" />
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                <Setter TargetName="Caret" Property="RenderTransform">
+                                    <Setter.Value>
+                                        <RotateTransform Angle="90" />
+                                    </Setter.Value>
+                                </Setter>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#E7EFFC" />
+                                <Setter TargetName="Name" Property="Foreground" Value="#1A4FC0" />
+                                <Setter TargetName="Caret" Property="Fill" Value="#2F6FED" />
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:DateRow}">
+            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="34" Margin="20,0,0,0">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" Background="Transparent" CornerRadius="7" Padding="8,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Path x:Name="Caret" Grid.Column="0" Width="6" Height="8" Margin="0,0,9,0"
+                                      VerticalAlignment="Center" Fill="#B3BCC7" Data="M0,0 L6,4 L0,8 Z"
+                                      RenderTransformOrigin="0.4,0.5" />
+                                <TextBlock x:Name="Label" Grid.Column="1" Text="{Binding Label}" FontSize="12.5"
+                                           FontWeight="Medium" Foreground="#4A525C" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2" Text="{Binding ClipsLabel}" FontSize="10.5"
+                                           Foreground="#9AA3AE" VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#F0F2F6" />
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                <Setter TargetName="Caret" Property="RenderTransform">
+                                    <Setter.Value>
+                                        <RotateTransform Angle="90" />
+                                    </Setter.Value>
+                                </Setter>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#EEF4FD" />
+                                <Setter TargetName="Label" Property="Foreground" Value="#1F2328" />
+                                <Setter TargetName="Label" Property="FontWeight" Value="SemiBold" />
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:ClipRow}">
+            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="38" Margin="40,0,0,0">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" Background="Transparent" CornerRadius="7" Padding="8,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Rectangle x:Name="Dot" Grid.Column="0" Width="7" Height="7" RadiusX="2" RadiusY="2"
+                                           Margin="0,0,9,0" VerticalAlignment="Center" Fill="#2F6FED" />
+                                <TextBlock x:Name="Range" Grid.Column="1" Text="{Binding TimeRange}"
+                                           FontFamily="{StaticResource MonoFont}" FontSize="12" FontWeight="SemiBold"
+                                           Foreground="#28303A" VerticalAlignment="Center" />
+                                <TextBlock x:Name="Dur" Grid.Column="2" Text="{Binding Duration}" FontSize="10.5"
+                                           Foreground="#96A0AB" VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#F0F2F6" />
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="#2F6FED" />
+                                <Setter TargetName="Range" Property="Foreground" Value="White" />
+                                <Setter TargetName="Dur" Property="Foreground" Value="#CCFFFFFF" />
+                                <Setter TargetName="Dot" Property="Fill" Value="White" />
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+        </DataTemplate>
     </Window.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="34" />
+            <RowDefinition Height="60" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="26" />
         </Grid.RowDefinitions>
 
-        <!-- Toolbar -->
-        <Border Grid.Row="0" Background="#26272E" Padding="10,8">
-            <DockPanel>
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                    <TextBlock Text="Card:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <ComboBox Width="330" Height="30" ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}"
-                              VerticalAlignment="Center" />
-                    <Button Content="⟳" ToolTip="Scan for cards again" Command="{Binding RefreshDevicesCommand}" />
-                    <Button Content="Open card" Command="{Binding OpenSelectedDeviceCommand}" FontWeight="SemiBold" />
-                    <Button Content="Open image…" Command="{Binding OpenImageCommand}" />
-                    <Button Content="Close" Command="{Binding CloseCardCommand}"
-                            Visibility="{Binding IsCardOpen, Converter={StaticResource BoolToVis}}" />
-                    <CheckBox Content="Show all drives" IsChecked="{Binding ShowAllDrives}" Margin="12,0,0,0"
-                              ToolTip="Also list disks that don't look like Axis camera cards" />
-                    <TextBlock Text="{Binding DeviceScanStatus}" VerticalAlignment="Center" Margin="12,0,0,0"
-                               Foreground="#9AA0B4" />
-                </StackPanel>
-                <TextBlock DockPanel.Dock="Right" Text="{Binding BusyText}" VerticalAlignment="Center"
-                           HorizontalAlignment="Right" Foreground="#9AA0B4" />
+        <!-- Title bar -->
+        <Border Grid.Row="0" Background="#F7F8FA" BorderBrush="#E2E5E9" BorderThickness="0,0,0,1">
+            <DockPanel LastChildFill="False">
+                <Border DockPanel.Dock="Left" Width="16" Height="16" CornerRadius="3" Margin="12,0,10,0">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#2F6FED" Offset="0" />
+                            <GradientStop Color="#1B4FD0" Offset="1" />
+                        </LinearGradientBrush>
+                    </Border.Background>
+                </Border>
+                <TextBlock DockPanel.Dock="Left" Text="Axis SD Card Reader" VerticalAlignment="Center"
+                           FontSize="12" FontWeight="SemiBold" Foreground="#3A4048" />
+                <Button DockPanel.Dock="Right" Style="{StaticResource CloseCaptionButton}" Command="{Binding CloseWindowCommand}">
+                    <TextBlock Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="10" />
+                </Button>
+                <Button DockPanel.Dock="Right" Style="{StaticResource CaptionButton}" Command="{Binding ToggleMaximizeCommand}">
+                    <TextBlock Text="&#xE922;" FontFamily="Segoe MDL2 Assets" FontSize="10" />
+                </Button>
+                <Button DockPanel.Dock="Right" Style="{StaticResource CaptionButton}" Command="{Binding MinimizeCommand}">
+                    <TextBlock Text="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="10" />
+                </Button>
             </DockPanel>
         </Border>
 
-        <!-- Protection banner -->
-        <Border Grid.Row="1" Background="#173D2B" Padding="10,6"
-                Visibility="{Binding IsCardOpen, Converter={StaticResource BoolToVis}}"
-                ToolTip="{Binding ProtectionDetails}">
-            <StackPanel Orientation="Horizontal">
-                <TextBlock Text="{Binding StatusBanner}" Foreground="#7BE0A2" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding CardDescription, StringFormat='   —   {0}'}" Foreground="#9AA0B4" />
-            </StackPanel>
-        </Border>
+        <!-- Toolbar -->
+        <Border Grid.Row="1" Background="White" BorderBrush="#E2E5E9" BorderThickness="0,0,0,1"
+                Visibility="{Binding IsCardOpen, Converter={StaticResource BoolToVis}}">
+            <DockPanel LastChildFill="False" Margin="16,0">
+                <!-- Card identity -->
+                <Border DockPanel.Dock="Left" Width="34" Height="34" CornerRadius="7" Background="#F0F3F8"
+                        BorderBrush="#E2E7EF" BorderThickness="1" Margin="0,0,11,0">
+                    <Border Width="15" Height="11" CornerRadius="2" Background="#2F6FED" />
+                </Border>
+                <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <TextBlock Text="{Binding CardTitle}" FontSize="13" FontWeight="SemiBold" Foreground="#1F2328" />
+                    <TextBlock Text="{Binding CardSubtitle}" FontSize="11.5" Foreground="#6B747F" />
+                </StackPanel>
 
-        <!-- Main area -->
-        <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="340" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <!-- Recordings tree -->
-            <Border Grid.Column="0" Background="#26272E" Margin="8" CornerRadius="6" Padding="4">
-                <Grid>
-                    <TreeView ItemsSource="{Binding Cameras}" Background="Transparent" BorderThickness="0"
-                              SelectedItemChanged="OnRecordingSelected" Foreground="#EAEAEA">
-                        <TreeView.ItemContainerStyle>
-                            <Style TargetType="TreeViewItem">
-                                <Setter Property="IsExpanded" Value="True" />
-                                <Setter Property="Foreground" Value="#EAEAEA" />
-                            </Style>
-                        </TreeView.ItemContainerStyle>
-                        <TreeView.Resources>
-                            <HierarchicalDataTemplate DataType="{x:Type vm:CameraNode}" ItemsSource="{Binding Recordings}">
-                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Margin="2,4" />
-                            </HierarchicalDataTemplate>
-                            <DataTemplate DataType="{x:Type vm:RecordingItem}">
-                                <StackPanel Margin="2,3">
-                                    <TextBlock Text="{Binding DisplayName}" />
-                                    <TextBlock Text="{Binding Details}" FontSize="11" Foreground="#9AA0B4" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </TreeView.Resources>
-                    </TreeView>
-
-                    <TextBlock Text="Insert a card and choose 'Open card',&#10;or open a card image file."
-                               Foreground="#9AA0B4" HorizontalAlignment="Center" VerticalAlignment="Center"
-                               TextAlignment="Center">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsCardOpen}" Value="False">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </Grid>
-            </Border>
-
-            <!-- Player -->
-            <Grid Grid.Column="1" Margin="0,8,8,8">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-
-                <TextBlock Grid.Row="0" Text="{Binding Player.Title}" FontWeight="SemiBold" Margin="4,0,4,6" />
-
-                <Border Grid.Row="1" Background="Black" CornerRadius="6">
-                    <vlc:VideoView x:Name="VideoView" MediaPlayer="{Binding Player.MediaPlayer}" />
+                <!-- Trust indicator -->
+                <Border DockPanel.Dock="Left" Background="#EAF6EF" BorderBrush="#BFE4CF" BorderThickness="1"
+                        CornerRadius="8" Padding="11,7,13,7" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE72E;" FontFamily="Segoe MDL2 Assets" FontSize="15" Foreground="#1A8A5A"
+                                   VerticalAlignment="Center" Margin="0,0,9,0" />
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="Card locked · Read-only" FontSize="12.5" FontWeight="Bold" Foreground="#136C46" />
+                            <TextBlock Text="Footage cannot be changed or deleted" FontSize="10.5" Foreground="#2F8A63" />
+                        </StackPanel>
+                    </StackPanel>
                 </Border>
 
-                <Grid Grid.Row="2" Margin="4,8,4,0">
+                <!-- Export button (right) -->
+                <Button DockPanel.Dock="Right" Command="{Binding OpenExportCommand}" Height="38" Padding="18,0"
+                        Cursor="Hand" IsEnabled="{Binding Player.HasSelection}" VerticalAlignment="Center">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="B" CornerRadius="9" Background="#2F6FED" Padding="{TemplateBinding Padding}">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE898;" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                                               Foreground="White" x:Name="Ico" Margin="0,0,9,0" />
+                                    <TextBlock Text="Export" FontSize="13" FontWeight="Bold" Foreground="White" x:Name="Txt" />
+                                </StackPanel>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="B" Property="Background" Value="#EEF0F3" />
+                                    <Setter TargetName="Ico" Property="Foreground" Value="#B3BCC7" />
+                                    <Setter TargetName="Txt" Property="Foreground" Value="#B3BCC7" />
+                                </Trigger>
+                                <MultiTrigger>
+                                    <MultiTrigger.Conditions>
+                                        <Condition Property="IsEnabled" Value="True" />
+                                        <Condition Property="IsMouseOver" Value="True" />
+                                    </MultiTrigger.Conditions>
+                                    <Setter TargetName="B" Property="Background" Value="#215FE0" />
+                                </MultiTrigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+
+                <!-- Search -->
+                <Border DockPanel.Dock="Right" Width="240" Height="34" Background="#F4F6F9" BorderBrush="#E2E7EF"
+                        BorderThickness="1" CornerRadius="8" Padding="12,0" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <Grid>
+                        <TextBlock Text="Search cameras &amp; times…" FontSize="12.5" Foreground="#98A1AB"
+                                   VerticalAlignment="Center"
+                                   Visibility="{Binding SearchHasText, Converter={StaticResource InverseBoolToVis}}" />
+                        <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0"
+                                 Background="Transparent" VerticalAlignment="Center" FontSize="12.5" Foreground="#1F2328" />
+                    </Grid>
+                </Border>
+            </DockPanel>
+        </Border>
+
+        <!-- Body -->
+        <Grid Grid.Row="2">
+            <Grid Visibility="{Binding IsCardOpen, Converter={StaticResource BoolToVis}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="322" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Sidebar -->
+                <Border Grid.Column="0" Background="#F7F8FA" BorderBrush="#E2E5E9" BorderThickness="0,0,1,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="42" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Border Grid.Row="0" BorderBrush="#EAECEF" BorderThickness="0,0,0,1" Padding="16,0,14,0">
+                            <DockPanel LastChildFill="False">
+                                <TextBlock DockPanel.Dock="Left" Text="RECORDINGS BY CAMERA" FontSize="11" FontWeight="Bold"
+                                           Foreground="#8A929C" VerticalAlignment="Center" />
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding CamCountLabel}" FontSize="11"
+                                           Foreground="#9AA3AE" VerticalAlignment="Center" />
+                            </DockPanel>
+                        </Border>
+                        <ListBox Grid.Row="1" ItemsSource="{Binding Rows}" BorderThickness="0" Background="Transparent"
+                                 Padding="8,6" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="0,1" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Focusable" Value="False" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ListBoxItem">
+                                                <ContentPresenter />
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                        </ListBox>
+                        <Border Grid.Row="2" BorderBrush="#EAECEF" BorderThickness="0,1,0,0" Background="#FBFBFC" Padding="16,11">
+                            <TextBlock FontSize="11" Foreground="#8A929C" TextWrapping="Wrap">
+                                <Run Text="Recorded footage spans " /><LineBreak />
+                                <Run Text="{Binding FootageSpanLabel}" Foreground="#4A525C" FontWeight="SemiBold" />
+                            </TextBlock>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <!-- Main -->
+                <Grid Grid.Column="1" Background="#E7E9ED">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="46" />
+                        <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Slider Grid.Row="0" Minimum="0" Maximum="{Binding Player.SessionLengthSeconds}"
-                            Value="{Binding Player.SessionPositionSeconds, Mode=OneWay}"
-                            Thumb.DragCompleted="OnSliderDragCompleted"
-                            PreviewMouseLeftButtonUp="OnSliderClicked"
-                            IsEnabled="{Binding Player.HasRecording}" x:Name="TimelineSlider" />
+                    <!-- Now-playing header -->
+                    <Border Grid.Row="0" Background="White" BorderBrush="#E2E5E9" BorderThickness="0,0,0,1" Padding="18,0">
+                        <DockPanel LastChildFill="False">
+                            <Ellipse DockPanel.Dock="Left" Width="8" Height="8" Fill="#2F6FED" VerticalAlignment="Center" Margin="0,0,12,0" />
+                            <TextBlock DockPanel.Dock="Left" Text="{Binding Player.CameraName}" FontSize="13.5"
+                                       FontWeight="SemiBold" Foreground="#1F2328" VerticalAlignment="Center" Margin="0,0,12,0" />
+                            <TextBlock DockPanel.Dock="Left" Text="{Binding Player.CameraModel}" FontSize="12"
+                                       Foreground="#9AA3AE" VerticalAlignment="Center" Margin="0,0,12,0" />
+                            <Border DockPanel.Dock="Left" Width="1" Height="16" Background="#E2E5E9" Margin="0,0,12,0" />
+                            <TextBlock DockPanel.Dock="Left" Text="{Binding Player.DateLabel}" FontSize="13"
+                                       Foreground="#5B6470" VerticalAlignment="Center" />
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding Player.SegCountLabel}" FontSize="11.5"
+                                       Foreground="#8A929C" VerticalAlignment="Center" />
+                        </DockPanel>
+                    </Border>
 
-                    <DockPanel Grid.Row="1" Margin="0,6,0,0">
-                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                            <Button Content="⏯ Play / Pause" Command="{Binding Player.PlayPauseCommand}" />
-                            <Button Content="⏹ Stop" Command="{Binding Player.StopCommand}" />
-                            <TextBlock Text="Speed:" VerticalAlignment="Center" Margin="12,0,4,0" />
-                            <ComboBox Width="70" ItemsSource="{Binding Player.AvailableRates}"
-                                      SelectedItem="{Binding Player.PlaybackRate}" />
-                            <Button Content="⬇ Export…" Command="{Binding ExportSelectedRecordingCommand}"
-                                    Margin="12,0,0,0"
-                                    IsEnabled="{Binding Player.HasRecording}"
-                                    ToolTip="Copy this recording's MKV files to a local folder" />
+                    <!-- Video surface -->
+                    <Grid Grid.Row="1" Margin="20">
+                        <Border MaxWidth="1000" Background="#0D0F12" CornerRadius="6">
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="30" ShadowDepth="8" Direction="270" Opacity="0.28" Color="#141A23" />
+                            </Border.Effect>
+                            <Grid>
+                                <!-- Real video render surface -->
+                                <vlc:VideoView x:Name="VideoView" MediaPlayer="{Binding Player.MediaPlayer}"
+                                               Visibility="{Binding Player.HasFootage, Converter={StaticResource BoolToVis}}" />
+                                <!-- No-recording gap state -->
+                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                                            Visibility="{Binding Player.NoFootage, Converter={StaticResource BoolToVis}}">
+                                    <Grid Width="46" Height="46" Margin="0,0,0,16" HorizontalAlignment="Center">
+                                        <Ellipse Stroke="#33404E" StrokeThickness="2" />
+                                        <Rectangle Width="22" Height="2" Fill="#33404E" RenderTransformOrigin="0.5,0.5"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <Rectangle.RenderTransform>
+                                                <RotateTransform Angle="-45" />
+                                            </Rectangle.RenderTransform>
+                                        </Rectangle>
+                                    </Grid>
+                                    <TextBlock Text="No recording at this time" FontSize="14" FontWeight="SemiBold"
+                                               Foreground="#8996A5" HorizontalAlignment="Center" />
+                                    <TextBlock Foreground="#5A6675" FontSize="12" Margin="0,6,0,0" HorizontalAlignment="Center">
+                                        <Run Text="The camera was not recording at " /><Run Text="{Binding Player.ClockString, Mode=OneWay}" /><Run Text="." />
+                                    </TextBlock>
+                                    <Button Command="{Binding Player.GoToNearestCommand}" Content="Go to nearest recording ▸"
+                                            HorizontalAlignment="Center" Margin="0,16,0,0" Cursor="Hand" Foreground="#CDD6E0"
+                                            FontSize="12.5" FontWeight="SemiBold">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border x:Name="B" Background="#243040" BorderBrush="#3A4859" BorderThickness="1"
+                                                        CornerRadius="7" Padding="16,8">
+                                                    <ContentPresenter />
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="B" Property="Background" Value="#2C3A4C" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <!-- Timeline + transport -->
+                    <Border Grid.Row="2" Background="White" BorderBrush="#E2E5E9" BorderThickness="0,1,0,0" Padding="22,14,22,18">
+                        <StackPanel>
+                            <!-- Timeline header -->
+                            <DockPanel LastChildFill="False" Margin="0,0,0,6">
+                                <TextBlock DockPanel.Dock="Left" Text="TIMELINE · FULL DAY" FontSize="11" FontWeight="Bold"
+                                           Foreground="#8A929C" VerticalAlignment="Center" />
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
+                                        <Border Width="12" Height="6" CornerRadius="2" Background="#2F6FED" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <TextBlock Text="Recording" FontSize="11" Foreground="#8A929C" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
+                                        <Border Width="12" Height="6" CornerRadius="2" Background="#E6E9EE" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <TextBlock Text="No footage" FontSize="11" Foreground="#8A929C" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Visibility="{Binding Player.HasSelection, Converter={StaticResource BoolToVis}}">
+                                        <Border Width="12" Height="6" CornerRadius="2" Background="#F7C948" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <TextBlock Text="Export range" FontSize="11" Foreground="#8A929C" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <ctrl:TimelineControl x:Name="Timeline"
+                                                  SegmentsSource="{Binding Player.TimelineSegments}"
+                                                  CurrentSeconds="{Binding Player.CurrentSeconds}"
+                                                  SelInSeconds="{Binding Player.SelInSeconds}"
+                                                  SelOutSeconds="{Binding Player.SelOutSeconds}" />
+
+                            <!-- Transport -->
+                            <Grid Margin="0,12,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <!-- prev / play / next -->
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Style="{StaticResource RoundButton}" Command="{Binding Player.StepPrevCommand}" ToolTip="Previous clip">
+                                        <TextBlock Text="&#xE892;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="#3A4048" />
+                                    </Button>
+                                    <Button Width="52" Height="52" Cursor="Hand" Margin="8,0" Command="{Binding Player.TogglePlayCommand}">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border x:Name="B" Width="52" Height="52" CornerRadius="26" Background="#2F6FED">
+                                                    <Border.Effect>
+                                                        <DropShadowEffect BlurRadius="12" ShadowDepth="4" Direction="270" Opacity="0.32" Color="#2F6FED" />
+                                                    </Border.Effect>
+                                                    <Grid>
+                                                        <TextBlock Text="&#xE769;" FontFamily="Segoe MDL2 Assets" FontSize="20" Foreground="White"
+                                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                   Visibility="{Binding Player.IsPlaying, Converter={StaticResource BoolToVis}}" />
+                                                        <TextBlock Text="&#xE768;" FontFamily="Segoe MDL2 Assets" FontSize="20" Foreground="White"
+                                                                   HorizontalAlignment="Center" VerticalAlignment="Center" Margin="3,0,0,0"
+                                                                   Visibility="{Binding Player.IsPlaying, Converter={StaticResource InverseBoolToVis}}" />
+                                                    </Grid>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="B" Property="Background" Value="#215FE0" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
+                                    <Button Style="{StaticResource RoundButton}" Command="{Binding Player.StepNextCommand}" ToolTip="Next clip">
+                                        <TextBlock Text="&#xE893;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="#3A4048" />
+                                    </Button>
+                                </StackPanel>
+
+                                <!-- clock -->
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="16,0,0,0">
+                                    <TextBlock Text="{Binding Player.ClockString}" FontFamily="{StaticResource MonoFont}"
+                                               FontSize="20" FontWeight="SemiBold" Foreground="#1F2328" />
+                                    <TextBlock FontSize="11" Foreground="#96A0AB">
+                                        <Run Text="of " /><Run Text="{Binding Player.DateLabelShort, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Player.StatusLabel, Mode=OneWay}" />
+                                    </TextBlock>
+                                </StackPanel>
+
+                                <!-- speed -->
+                                <Border Grid.Column="3" Background="#F4F6F9" BorderBrush="#E2E7EF" BorderThickness="1"
+                                        CornerRadius="9" Padding="4" VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <StackPanel.Resources>
+                                            <Style TargetType="Button" x:Key="SpeedButton">
+                                                <Setter Property="MinWidth" Value="36" />
+                                                <Setter Property="Height" Value="30" />
+                                                <Setter Property="Cursor" Value="Hand" />
+                                                <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+                                                <Setter Property="FontSize" Value="12" />
+                                                <Setter Property="FontWeight" Value="Bold" />
+                                                <Setter Property="Command" Value="{Binding Player.SetRateCommand}" />
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="Button">
+                                                            <Border CornerRadius="6" Padding="8,0" Background="{TemplateBinding Background}"
+                                                                    TextElement.Foreground="{TemplateBinding Foreground}">
+                                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                            </Border>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </StackPanel.Resources>
+                                        <Button Style="{StaticResource SpeedButton}" Content="0.5×" CommandParameter="0.5"
+                                                Background="{Binding Player.Rate, Converter={StaticResource RateBg}, ConverterParameter=0.5}"
+                                                Foreground="{Binding Player.Rate, Converter={StaticResource RateFg}, ConverterParameter=0.5}" />
+                                        <Button Style="{StaticResource SpeedButton}" Content="1×" CommandParameter="1"
+                                                Background="{Binding Player.Rate, Converter={StaticResource RateBg}, ConverterParameter=1}"
+                                                Foreground="{Binding Player.Rate, Converter={StaticResource RateFg}, ConverterParameter=1}" />
+                                        <Button Style="{StaticResource SpeedButton}" Content="2×" CommandParameter="2"
+                                                Background="{Binding Player.Rate, Converter={StaticResource RateBg}, ConverterParameter=2}"
+                                                Foreground="{Binding Player.Rate, Converter={StaticResource RateFg}, ConverterParameter=2}" />
+                                        <Button Style="{StaticResource SpeedButton}" Content="4×" CommandParameter="4"
+                                                Background="{Binding Player.Rate, Converter={StaticResource RateBg}, ConverterParameter=4}"
+                                                Foreground="{Binding Player.Rate, Converter={StaticResource RateFg}, ConverterParameter=4}" />
+                                        <Button Style="{StaticResource SpeedButton}" Content="8×" CommandParameter="8"
+                                                Background="{Binding Player.Rate, Converter={StaticResource RateBg}, ConverterParameter=8}"
+                                                Foreground="{Binding Player.Rate, Converter={StaticResource RateFg}, ConverterParameter=8}" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- mute -->
+                                <Button Grid.Column="4" Style="{StaticResource RoundButton}" Command="{Binding Player.ToggleMuteCommand}" ToolTip="Mute" Margin="0,0,16,0">
+                                    <Grid>
+                                        <TextBlock Text="&#xE767;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="#3A4048"
+                                                   Visibility="{Binding Player.IsMuted, Converter={StaticResource InverseBoolToVis}}" />
+                                        <TextBlock Text="&#xE74F;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="#E0564E"
+                                                   Visibility="{Binding Player.IsMuted, Converter={StaticResource BoolToVis}}" />
+                                    </Grid>
+                                </Button>
+
+                                <Border Grid.Column="5" Width="1" Height="32" Background="#E6E9EE" VerticalAlignment="Center" Margin="0,0,16,0" />
+
+                                <!-- mark in/out -->
+                                <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Style="{StaticResource ToolbarButton}" Height="38" Command="{Binding Player.MarkInCommand}" Margin="0,0,8,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Path Width="8" Height="12" Fill="#F7C948" Data="M0,0 L8,6 L0,12 Z" VerticalAlignment="Center" Margin="0,0,7,0" />
+                                            <TextBlock Text="Mark in" FontSize="12.5" FontWeight="SemiBold" Foreground="#3A4048" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Style="{StaticResource ToolbarButton}" Height="38" Command="{Binding Player.MarkOutCommand}" Margin="0,0,10,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="Mark out" FontSize="12.5" FontWeight="SemiBold" Foreground="#3A4048" Margin="0,0,7,0" />
+                                            <Path Width="8" Height="12" Fill="#F7C948" Data="M8,0 L0,6 L8,12 Z" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                    <TextBlock Text="{Binding Player.SelectionLabel}" FontSize="12" Foreground="#96A0AB"
+                                               MinWidth="118" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Grid>
                         </StackPanel>
-                        <TextBlock DockPanel.Dock="Right" Text="{Binding Player.PositionText}"
-                                   HorizontalAlignment="Right" VerticalAlignment="Center" FontFamily="Consolas" />
-                    </DockPanel>
+                    </Border>
                 </Grid>
             </Grid>
+
+            <!-- Waiting / no-card state -->
+            <Border Background="#EEF0F3" Visibility="{Binding ShowWaiting, Converter={StaticResource BoolToVis}}">
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="440">
+                    <Border Width="56" Height="56" CornerRadius="12" HorizontalAlignment="Center" Margin="0,0,0,20">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#2F6FED" Offset="0" />
+                                <GradientStop Color="#1B4FD0" Offset="1" />
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <TextBlock Text="&#xE7F1;" FontFamily="Segoe MDL2 Assets" FontSize="26" Foreground="White"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Text="{Binding WaitingMessage}" FontSize="15" Foreground="#5B6470" TextAlignment="Center"
+                               TextWrapping="Wrap" HorizontalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,0">
+                        <Button Style="{StaticResource ToolbarButton}" Content="Scan again" Command="{Binding ScanAndOpenCommand}" Margin="0,0,10,0" />
+                        <Button Style="{StaticResource ToolbarButton}" Content="Open image…" Command="{Binding OpenImageCommand}" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding BusyText}" FontSize="12" Foreground="#8A929C" HorizontalAlignment="Center"
+                               Margin="0,16,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" />
+                </StackPanel>
+            </Border>
+
+            <!-- Busy overlay (when a card is open) -->
+            <Border Background="#66000000" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"
+                    d:IsHidden="True">
+                <Border Background="White" CornerRadius="10" Padding="28,20" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding BusyText}" FontSize="13" Foreground="#3A4048" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+            </Border>
+        </Grid>
+
+        <!-- Status bar -->
+        <Border Grid.Row="3" Background="#F2F3F6" BorderBrush="#E2E5E9" BorderThickness="0,1,0,0" Padding="14,0"
+                Visibility="{Binding IsCardOpen, Converter={StaticResource BoolToVis}}">
+            <DockPanel LastChildFill="False">
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse Width="7" Height="7" Fill="#1A8A5A" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <TextBlock Text="{Binding MountLabel}" FontSize="11" Foreground="#7D8691" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock DockPanel.Dock="Right" Text="Index complete" FontSize="11" Foreground="#7D8691" VerticalAlignment="Center" Margin="16,0,0,0" />
+                <TextBlock DockPanel.Dock="Right" FontSize="11" Foreground="#7D8691" VerticalAlignment="Center">
+                    <Run Text="{Binding RecCountLabel, Mode=OneWay}" /><Run Text=" indexed" />
+                </TextBlock>
+            </DockPanel>
+        </Border>
+
+        <!-- Export dialog -->
+        <Grid Grid.RowSpan="4" Background="#571C2128" Visibility="{Binding ShowExport, Converter={StaticResource BoolToVis}}">
+            <!-- Scrim: clicking outside the card closes -->
+            <Button Command="{Binding CloseExportCommand}" Background="Transparent" BorderThickness="0" Cursor="Arrow">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="Transparent" />
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+            <Border Width="520" Background="White" CornerRadius="12" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="70" ShadowDepth="24" Direction="270" Opacity="0.4" Color="#0F141C" />
+                </Border.Effect>
+                <StackPanel>
+                    <StackPanel Margin="24,20,24,16">
+                        <TextBlock Text="Export footage" FontSize="17" FontWeight="Bold" Foreground="#1F2328" />
+                        <TextBlock Text="A copy is written to your PC. The card is never modified." FontSize="12.5"
+                                   Foreground="#7D8691" Margin="0,3,0,0" />
+                    </StackPanel>
+                    <Border BorderBrush="#EEF0F3" BorderThickness="0,1,0,0" Padding="24,20">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="CAMERA" FontSize="11" FontWeight="Bold" Foreground="#8A929C" Margin="0,0,0,6" />
+                                    <TextBlock Text="{Binding Player.CameraName}" FontSize="13.5" FontWeight="SemiBold" Foreground="#1F2328" />
+                                    <TextBlock Text="{Binding Player.CameraModel}" FontSize="12" Foreground="#96A0AB" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="RANGE" FontSize="11" FontWeight="Bold" Foreground="#8A929C" Margin="0,0,0,6" />
+                                    <TextBlock Text="{Binding Player.SelectionRangeText}" FontSize="13.5" FontWeight="SemiBold"
+                                               Foreground="#1F2328" FontFamily="{StaticResource MonoFont}" />
+                                    <TextBlock FontSize="12" Foreground="#96A0AB">
+                                        <Run Text="{Binding Player.SelectionDurationText, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Player.DateLabelShort, Mode=OneWay}" />
+                                    </TextBlock>
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock Text="FORMAT" FontSize="11" FontWeight="Bold" Foreground="#8A929C" Margin="0,0,0,8" />
+                            <UniformGrid Columns="3" Margin="0,0,0,16">
+                                <UniformGrid.Resources>
+                                    <Style TargetType="Button" x:Key="FormatCard">
+                                        <Setter Property="Cursor" Value="Hand" />
+                                        <Setter Property="Margin" Value="0,0,8,0" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                    </Style>
+                                </UniformGrid.Resources>
+                                <Button Style="{StaticResource FormatCard}" Command="{Binding SetExportFormatCommand}" CommandParameter="mp4">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="B" CornerRadius="9" Background="#F7F8FA" BorderBrush="#E6E9EE" BorderThickness="1.5" Padding="13,11">
+                                                <StackPanel>
+                                                    <TextBlock x:Name="T" Text="MP4" FontSize="13" FontWeight="Bold" Foreground="#3A4048" />
+                                                    <TextBlock Text="H.264 · universal" FontSize="11" Foreground="#96A0AB" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding ExportFormat}" Value="mp4">
+                                                    <Setter TargetName="B" Property="Background" Value="#EEF4FD" />
+                                                    <Setter TargetName="B" Property="BorderBrush" Value="#2F6FED" />
+                                                    <Setter TargetName="T" Property="Foreground" Value="#1A4FC0" />
+                                                </DataTrigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                                <Button Style="{StaticResource FormatCard}" Command="{Binding SetExportFormatCommand}" CommandParameter="mkv">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="B" CornerRadius="9" Background="#F7F8FA" BorderBrush="#E6E9EE" BorderThickness="1.5" Padding="13,11">
+                                                <StackPanel>
+                                                    <TextBlock x:Name="T" Text="MKV" FontSize="13" FontWeight="Bold" Foreground="#3A4048" />
+                                                    <TextBlock Text="original streams" FontSize="11" Foreground="#96A0AB" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding ExportFormat}" Value="mkv">
+                                                    <Setter TargetName="B" Property="Background" Value="#EEF4FD" />
+                                                    <Setter TargetName="B" Property="BorderBrush" Value="#2F6FED" />
+                                                    <Setter TargetName="T" Property="Foreground" Value="#1A4FC0" />
+                                                </DataTrigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                                <Button Style="{StaticResource FormatCard}" Margin="0" Command="{Binding SetExportFormatCommand}" CommandParameter="asf">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="B" CornerRadius="9" Background="#F7F8FA" BorderBrush="#E6E9EE" BorderThickness="1.5" Padding="13,11">
+                                                <StackPanel>
+                                                    <TextBlock x:Name="T" Text="ASF" FontSize="13" FontWeight="Bold" Foreground="#3A4048" />
+                                                    <TextBlock Text="Axis native" FontSize="11" Foreground="#96A0AB" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding ExportFormat}" Value="asf">
+                                                    <Setter TargetName="B" Property="Background" Value="#EEF4FD" />
+                                                    <Setter TargetName="B" Property="BorderBrush" Value="#2F6FED" />
+                                                    <Setter TargetName="T" Property="Foreground" Value="#1A4FC0" />
+                                                </DataTrigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                            </UniformGrid>
+
+                            <Button Command="{Binding ToggleStampCommand}" HorizontalAlignment="Left" Cursor="Hand" Margin="0,0,0,0">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <StackPanel Orientation="Horizontal" Background="Transparent">
+                                            <Border x:Name="Box" Width="19" Height="19" CornerRadius="5" BorderThickness="1.5"
+                                                    BorderBrush="#C4CAD3" Background="White" Margin="0,0,10,0">
+                                                <TextBlock x:Name="Check" Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                                                           Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
+                                            </Border>
+                                            <TextBlock Text="Burn timestamp &amp; camera name into exported video" FontSize="13" Foreground="#3A4048" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <ControlTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding IncludeStamp}" Value="True">
+                                                <Setter TargetName="Box" Property="Background" Value="#2F6FED" />
+                                                <Setter TargetName="Box" Property="BorderBrush" Value="#2F6FED" />
+                                                <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+
+                            <Border Background="#EAF6EF" BorderBrush="#CBE8D8" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,16,0,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="#1A8A5A"
+                                               VerticalAlignment="Center" Margin="0,0,9,0" />
+                                    <TextBlock Text="Export preserves original quality and metadata for evidentiary use."
+                                               FontSize="12" Foreground="#2F7A56" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                    <Border BorderBrush="#EEF0F3" BorderThickness="0,1,0,0" Padding="24,16">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button Style="{StaticResource ToolbarButton}" Height="40" Content="Cancel" Command="{Binding CloseExportCommand}" Margin="0,0,10,0" />
+                            <Button Height="40" Padding="22,0" Cursor="Hand" Command="{Binding DoExportCommand}">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="B" CornerRadius="9" Background="#2F6FED" Padding="{TemplateBinding Padding}">
+                                            <TextBlock Text="Export video" FontSize="13" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" />
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="B" Property="Background" Value="#215FE0" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
         </Grid>
     </Grid>
 </Window>

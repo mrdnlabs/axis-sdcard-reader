@@ -17,17 +17,26 @@ public sealed class OpenCard : IDisposable
     private readonly CardReader _reader;        // image files: owned directly
     private readonly SemaphoreSlim _ioLock = new(1, 1);
 
-    private OpenCard(SdCardSession? session, CardReader reader, string description, bool isPhysicalDevice)
+    private OpenCard(SdCardSession? session, CardReader reader, string description, bool isPhysicalDevice,
+        long? capacityBytes)
     {
         _session = session;
         _reader = reader;
         Description = description;
         IsPhysicalDevice = isPhysicalDevice;
+        CapacityBytes = capacityBytes;
     }
 
+    /// <summary>Friendly card name — device model (e.g. "SanDisk Extreme") or image file name.</summary>
     public string Description { get; }
 
     public bool IsPhysicalDevice { get; }
+
+    /// <summary>Physical disk number for a device card, else null (image mode).</summary>
+    public int? DiskNumber { get; private init; }
+
+    /// <summary>Card capacity in bytes, when known.</summary>
+    public long? CapacityBytes { get; }
 
     public CardOpenStatus Status => _reader.Status;
 
@@ -35,20 +44,36 @@ public sealed class OpenCard : IDisposable
 
     public DiscFileSystem? FileSystem => _reader.FileSystem;
 
+    /// <summary>ext4 volume label (Axis cameras write "Axis").</summary>
+    public string? VolumeLabel => _reader.FileSystem?.VolumeLabel;
+
     public IReadOnlyList<string> ProtectionLog => _session?.ProtectionLog ?? [];
 
     public AxisCard? Index { get; private set; }
 
-    public static OpenCard FromDevice(int diskNumber, string description)
+    public static OpenCard FromDevice(int diskNumber, string description, long? capacityBytes = null)
     {
         var session = SdCardSession.Open(diskNumber);
-        return new OpenCard(session, session.Card, description, isPhysicalDevice: true);
+        return new OpenCard(session, session.Card, description, isPhysicalDevice: true, capacityBytes)
+        {
+            DiskNumber = diskNumber,
+        };
     }
 
     public static OpenCard FromImage(string imagePath)
     {
         var reader = CardReader.OpenImage(imagePath);
-        return new OpenCard(null, reader, Path.GetFileName(imagePath), isPhysicalDevice: false);
+        long? size = null;
+        try
+        {
+            size = new FileInfo(imagePath).Length;
+        }
+        catch
+        {
+            // best effort
+        }
+
+        return new OpenCard(null, reader, Path.GetFileName(imagePath), isPhysicalDevice: false, size);
     }
 
     /// <summary>Runs a card I/O operation with exclusive access, off the calling thread.</summary>
@@ -78,6 +103,22 @@ public sealed class OpenCard : IDisposable
         return RunExclusive<object?>(() =>
         {
             recording.LoadChunkMetadata(fs);
+            return null;
+        });
+    }
+
+    /// <summary>Loads chunk metadata for many recordings in one exclusive pass (a day's worth).</summary>
+    public Task LoadMetadataAsync(IEnumerable<Recording> recordings)
+    {
+        var fs = FileSystem ?? throw new InvalidOperationException("No filesystem is open.");
+        var list = recordings.ToList();
+        return RunExclusive<object?>(() =>
+        {
+            foreach (var recording in list)
+            {
+                recording.LoadChunkMetadata(fs);
+            }
+
             return null;
         });
     }

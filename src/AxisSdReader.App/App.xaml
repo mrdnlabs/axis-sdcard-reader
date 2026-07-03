@@ -1,9 +1,16 @@
-﻿<Application x:Class="AxisSdReader.App.App"
+<Application x:Class="AxisSdReader.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:AxisSdReader.App"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         
+        <local:InverseBoolToVisibilityConverter x:Key="InverseBoolToVis" />
+        <local:NumberEqualsConverter x:Key="NumberEquals" />
+        <local:StringEqualsConverter x:Key="StringEquals" />
+        <local:RateActiveBackgroundConverter x:Key="RateBg" />
+        <local:RateActiveForegroundConverter x:Key="RateFg" />
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+        <FontFamily x:Key="MonoFont">Consolas, Cascadia Code, monospace</FontFamily>
     </Application.Resources>
 </Application>

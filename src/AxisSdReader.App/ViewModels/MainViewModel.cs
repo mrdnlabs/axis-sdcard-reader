@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 using AxisSdReader.App.Services;
@@ -11,71 +12,20 @@ using Microsoft.Win32;
 
 namespace AxisSdReader.App.ViewModels;
 
-/// <summary>A physical disk shown in the device list.</summary>
-public sealed record DeviceItem(int DiskNumber, string DisplayName, bool IsUsb, bool IsAxisCard)
-{
-    public override string ToString() => DisplayName;
-}
-
-/// <summary>A camera node in the recordings tree.</summary>
-public sealed record CameraNode(string Serial, IReadOnlyList<RecordingItem> Recordings)
-{
-    public string DisplayName => $"Camera {Serial}  ({Recordings.Count} recordings)";
-}
-
-/// <summary>A recording row in the recordings tree.</summary>
-public sealed partial class RecordingItem : ObservableObject
-{
-    public RecordingItem(Recording recording)
-    {
-        Recording = recording;
-        Details = $"{recording.Chunks.Count} chunks · {recording.TotalSizeBytes / (1024.0 * 1024):F0} MB";
-    }
-
-    public Recording Recording { get; }
-
-    public string DisplayName =>
-        (Recording.StartTime.Kind == DateTimeKind.Utc ? Recording.StartTime.ToLocalTime() : Recording.StartTime)
-        .ToString("yyyy-MM-dd HH:mm:ss");
-
-    [ObservableProperty]
-    private string _details;
-
-    public void RefreshDetails()
-    {
-        var duration = Recording.Duration is { } d ? $" · {d:hh\\:mm\\:ss}" : "";
-        var codec = Recording.VideoCodecId switch
-        {
-            "V_MPEG4/ISO/AVC" => " · H.264",
-            "V_MPEGH/ISO/HEVC" => " · H.265",
-            "V_AV1" => " · AV1",
-            null => "",
-            var other => $" · {other}",
-        };
-        var interrupted = Recording.WasInterrupted ? " · interrupted" : "";
-        Details = $"{Recording.Chunks.Count} chunks · {Recording.TotalSizeBytes / (1024.0 * 1024):F0} MB{duration}{codec}{interrupted}";
-    }
-}
-
 public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly Dispatcher _dispatcher;
     private readonly DeviceWatcher _watcher;
+
     private OpenCard? _card;
+    private IReadOnlyList<CameraNode> _cameras = [];
+    private readonly Dictionary<Recording, ClipRow> _clipRows = [];
+    private ClipRow? _highlightedClip;
 
-    public ObservableCollection<DeviceItem> Devices { get; } = [];
-
-    public ObservableCollection<CameraNode> Cameras { get; } = [];
-
-    public PlayerViewModel Player { get; } = new();
-
-    [ObservableProperty]
-    private DeviceItem? _selectedDevice;
+    // --- app state -----------------------------------------------------------
 
     [ObservableProperty]
-    private RecordingItem? _selectedRecording;
-
-    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowWaiting))]
     private bool _isCardOpen;
 
     [ObservableProperty]
@@ -85,107 +35,133 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string _busyText = "";
 
     [ObservableProperty]
-    private string _statusBanner = "";
+    [NotifyPropertyChangedFor(nameof(ShowWaiting))]
+    private string _waitingMessage = "Insert an Axis camera SD card to begin.";
+
+    public bool ShowWaiting => !IsCardOpen;
+
+    // --- card identity / chrome ---------------------------------------------
 
     [ObservableProperty]
-    private string _protectionDetails = "";
+    private string _cardTitle = "";
 
     [ObservableProperty]
-    private string _cardDescription = "";
+    private string _cardSubtitle = "";
+
+    [ObservableProperty]
+    private string _recCountLabel = "";
+
+    [ObservableProperty]
+    private string _camCountLabel = "";
+
+    [ObservableProperty]
+    private string _footageSpanLabel = "";
+
+    [ObservableProperty]
+    private string _mountLabel = "";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SearchHasText))]
+    private string _searchText = "";
+
+    public bool SearchHasText => SearchText.Length > 0;
+
+    // --- browse tree ---------------------------------------------------------
+
+    public ObservableCollection<BrowseRow> Rows { get; } = [];
+
+    public DayPlayerViewModel Player { get; } = new();
+
+    private string? _selectedCameraSerial;
+    private string? _selectedDateKey;
+    private readonly HashSet<string> _expandedCameras = [];
+    private readonly HashSet<string> _expandedDates = [];
+
+    // --- export dialog -------------------------------------------------------
+
+    [ObservableProperty]
+    private bool _showExport;
+
+    [ObservableProperty]
+    private string _exportFormat = "mp4";
+
+    [ObservableProperty]
+    private bool _includeStamp = true;
 
     public MainViewModel()
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
+        Player.ActiveRecordingChanged += OnActiveRecordingChanged;
+
         _watcher = new DeviceWatcher();
-        _watcher.DiskArrived += devicePath => _dispatcher.BeginInvoke(() => { _ = RefreshDevices(); });
-        _watcher.DiskRemoved += devicePath => _dispatcher.BeginInvoke(() => { _ = RefreshDevices(); });
-        _ = RefreshDevices();
+        _watcher.DiskArrived += path => _dispatcher.BeginInvoke(() => { _ = OnDeviceChanged(); });
+        _watcher.DiskRemoved += path => _dispatcher.BeginInvoke(() => { _ = OnDeviceChanged(); });
+
+        if (App.StartupImagePath is null)
+        {
+            _ = ScanAndOpenAsync();
+        }
     }
 
-    [ObservableProperty]
-    private bool _showAllDrives;
+    public async Task OpenImageFileAsync(string path) =>
+        await OpenCardAsync(() => OpenCard.FromImage(path), $"Opening {Path.GetFileName(path)}…");
 
-    [ObservableProperty]
-    private string _deviceScanStatus = "";
-
-    private IReadOnlyList<DeviceItem> _allDevices = [];
-
-    [RelayCommand]
-    private async Task RefreshDevices()
+    private async Task OnDeviceChanged()
     {
-        DeviceScanStatus = "Scanning for cards…";
-
-        // Enumeration and probing issue IOCTLs and raw reads; keep them off the UI thread.
-        // Only USB disks with media are probed for Axis content — system disks are never touched.
-        var probed = await Task.Run(() =>
-            DiskEnumerator.GetPhysicalDisks()
-                .Select(disk => (Disk: disk,
-                    Probe: disk.IsUsb && disk.SizeBytes > 0 ? AxisCardDetector.Probe(disk.DiskNumber) : null))
-                .ToList());
-
-        var items = new List<DeviceItem>();
-        foreach (var (disk, probe) in probed)
+        if (_card is { IsPhysicalDevice: true })
         {
-            var size = disk.SizeBytes is { } s ? $"{s / (1024.0 * 1024 * 1024):F1} GB" : "empty";
-            var isAxis = probe?.IsLikelyAxisCard == true;
-            var display = isAxis
-                ? $"Axis camera card  ({size}, disk #{disk.DiskNumber})"
-                : $"#{disk.DiskNumber}  {disk.FriendlyName}  ({size}{(disk.IsUsb ? ", USB" : "")})";
-            items.Add(new DeviceItem(disk.DiskNumber, display, disk.IsUsb, isAxis));
+            // A card is open; a removal may be ours. Verify it still reads; if not, close.
+            return;
         }
 
-        _allDevices = items;
-        RebuildDeviceList();
-    }
-
-    partial void OnShowAllDrivesChanged(bool value) => RebuildDeviceList();
-
-    private void RebuildDeviceList()
-    {
-        var previous = SelectedDevice?.DiskNumber;
-        Devices.Clear();
-
-        foreach (var device in _allDevices.Where(d => ShowAllDrives || d.IsAxisCard))
+        if (!IsCardOpen)
         {
-            Devices.Add(device);
+            await ScanAndOpenAsync();
         }
-
-        SelectedDevice = Devices.FirstOrDefault(d => d.DiskNumber == previous)
-            ?? Devices.FirstOrDefault(d => d.IsAxisCard)
-            ?? Devices.FirstOrDefault(d => d.IsUsb)
-            ?? Devices.FirstOrDefault();
-
-        DeviceScanStatus = Devices.Count > 0
-            ? ""
-            : ShowAllDrives
-                ? "No drives found."
-                : "No Axis camera card detected — insert a card, or tick 'Show all drives'.";
     }
 
     [RelayCommand]
-    private async Task OpenSelectedDevice()
+    private async Task ScanAndOpen()
     {
-        if (SelectedDevice is not { } device)
+        await ScanAndOpenAsync();
+    }
+
+    private async Task ScanAndOpenAsync()
+    {
+        if (IsBusy)
         {
             return;
         }
 
-        if (!device.IsUsb &&
-            MessageBox.Show(
-                $"{device.DisplayName} is not a USB device - it may be a system disk. Open it anyway?",
-                "Not a USB device", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        IsBusy = true;
+        BusyText = "Scanning for Axis cards…";
+        WaitingMessage = "Scanning for Axis camera cards…";
+        try
         {
-            return;
+            var card = await Task.Run(() => DiskEnumerator.GetPhysicalDisks()
+                .Where(d => d.IsUsb && d.SizeBytes > 0)
+                .Select(d => (Disk: d, Probe: AxisCardDetector.Probe(d.DiskNumber)))
+                .FirstOrDefault(x => x.Probe.IsLikelyAxisCard));
+
+            if (card.Disk is null)
+            {
+                WaitingMessage = "No Axis camera card detected.\nInsert a card, or open a card image.";
+                return;
+            }
+
+            await OpenCardAsync(
+                () => OpenCard.FromDevice(card.Disk.DiskNumber, card.Disk.FriendlyName, card.Disk.SizeBytes),
+                "Opening card…");
         }
-
-        await OpenCardAsync(
-            () => OpenCard.FromDevice(device.DiskNumber, device.DisplayName),
-            $"Opening disk #{device.DiskNumber}...");
+        finally
+        {
+            if (!IsCardOpen)
+            {
+                IsBusy = false;
+                BusyText = "";
+            }
+        }
     }
-
-    /// <summary>Opens a card image directly (command-line startup path).</summary>
-    public Task OpenImageFileAsync(string path) =>
-        OpenCardAsync(() => OpenCard.FromImage(path), "Opening image...");
 
     [RelayCommand]
     private async Task OpenImage()
@@ -195,66 +171,66 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             Title = "Open card image",
             Filter = "Card images (*.img;*.dd;*.raw;*.bin)|*.img;*.dd;*.raw;*.bin|All files (*.*)|*.*",
         };
-
         if (dialog.ShowDialog() == true)
         {
-            await OpenCardAsync(() => OpenCard.FromImage(dialog.FileName), "Opening image...");
+            await OpenImageFileAsync(dialog.FileName);
         }
     }
 
     private async Task OpenCardAsync(Func<OpenCard> open, string busyText)
     {
-        CloseCard();
+        CloseCardInternal();
         IsBusy = true;
         BusyText = busyText;
 
         try
         {
             var card = await Task.Run(open);
-
             if (card.Status != CardOpenStatus.Ok)
             {
                 var message = card.Status switch
                 {
                     CardOpenStatus.Encrypted => "This card is encrypted by the camera and cannot be read here.",
-                    CardOpenStatus.IncompatibleExt4 => $"The card's ext4 filesystem uses unsupported features:\n{card.FailureDetail}",
-                    _ => card.FailureDetail ?? "No readable filesystem found.",
+                    CardOpenStatus.IncompatibleExt4 => $"The card's filesystem uses unsupported features:\n{card.FailureDetail}",
+                    _ => card.FailureDetail ?? "No readable Axis recordings were found on this card.",
                 };
                 card.Dispose();
-                MessageBox.Show(message, "Cannot read card", MessageBoxButton.OK, MessageBoxImage.Warning);
+                WaitingMessage = message;
                 return;
             }
 
             _card = card;
-            CardDescription = card.Description;
-            StatusBanner = card.IsPhysicalDevice
-                ? "🔒 Card locked and opened read-only - Windows cannot write to or format it while this app is open."
-                : "Image file opened read-only.";
-            ProtectionDetails = string.Join(Environment.NewLine, card.ProtectionLog);
-
-            BusyText = "Indexing recordings...";
+            BusyText = "Indexing recordings…";
             var index = await card.IndexAsync();
 
-            Cameras.Clear();
-            foreach (var camera in index.Cameras)
+            _cameras = BuildBrowseModel(index);
+            ApplyCardIdentity(card, index);
+
+            _expandedCameras.Clear();
+            _expandedDates.Clear();
+            _selectedCameraSerial = _cameras.FirstOrDefault()?.Serial;
+            _selectedDateKey = _cameras.FirstOrDefault()?.Dates.FirstOrDefault()?.Key;
+            if (_selectedCameraSerial is not null)
             {
-                Cameras.Add(new CameraNode(
-                    camera.Serial,
-                    camera.Recordings.Select(r => new RecordingItem(r)).ToList()));
+                _expandedCameras.Add(_selectedCameraSerial);
             }
 
+            if (_selectedDateKey is not null)
+            {
+                _expandedDates.Add(_selectedDateKey);
+            }
+
+            RebuildRows();
             IsCardOpen = true;
 
-            if (index.Recordings.Count == 0)
+            if (_cameras.Count > 0 && _selectedDateKey is not null)
             {
-                MessageBox.Show(
-                    "The card was read successfully but contains no Axis recordings.",
-                    "No recordings", MessageBoxButton.OK, MessageBoxImage.Information);
+                await LoadActiveDay(seekFirst: true);
             }
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Error opening card", MessageBoxButton.OK, MessageBoxImage.Error);
+            WaitingMessage = ex.Message;
         }
         finally
         {
@@ -263,11 +239,266 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    [RelayCommand]
-    private async Task ExportSelectedRecording()
+    private static IReadOnlyList<CameraNode> BuildBrowseModel(AxisCard index)
     {
-        if (_card is null || SelectedRecording is not { } item)
+        var cameras = new List<CameraNode>();
+        foreach (var camera in index.Cameras)
         {
+            var dates = camera.Recordings
+                .GroupBy(r => LocalDate(r))
+                .OrderByDescending(g => g.Key)
+                .Select(g => new DateNode(g.Key, g.OrderBy(r => r.StartTime).ToList()))
+                .ToList();
+
+            var name = $"Camera {camera.Serial[^Math.Min(4, camera.Serial.Length)..]}";
+            cameras.Add(new CameraNode(camera.Serial, name, FormatMac(camera.Serial), dates));
+        }
+
+        return cameras;
+    }
+
+    private void ApplyCardIdentity(OpenCard card, AxisCard index)
+    {
+        var capacity = card.CapacityBytes is { } bytes ? $" · {FormatCapacity(bytes)}" : "";
+        CardTitle = $"{card.Description}{capacity}";
+
+        var total = index.Recordings.Count;
+        RecCountLabel = $"{total:N0} recording{(total == 1 ? "" : "s")}";
+        CardSubtitle = $"{RecCountLabel} · Axis edge storage";
+        CamCountLabel = $"{index.Cameras.Count} camera{(index.Cameras.Count == 1 ? "" : "s")}";
+
+        if (index.Recordings.Count > 0)
+        {
+            var first = index.Recordings.Min(r => LocalDate(r));
+            var last = index.Recordings.Max(r => LocalDate(r));
+            FootageSpanLabel = first == last
+                ? first.ToString("MMM d, yyyy")
+                : $"{first:MMM d} – {last:MMM d, yyyy}";
+        }
+        else
+        {
+            FootageSpanLabel = "No recordings";
+        }
+
+        var label = card.VolumeLabel is { Length: > 0 } vl ? vl : "Axis";
+        MountLabel = card.IsPhysicalDevice
+            ? $"Locked read-only · ext4 · {label} volume"
+            : $"Image · ext4 · {label} volume";
+    }
+
+    // --- browse tree ---------------------------------------------------------
+
+    private void RebuildRows()
+    {
+        var query = SearchText.Trim();
+        var hasQuery = query.Length > 0;
+
+        _clipRows.Clear();
+        _highlightedClip = null;
+        Rows.Clear();
+
+        foreach (var camera in _cameras)
+        {
+            var camExpanded = _expandedCameras.Contains(camera.Serial) || hasQuery;
+            var cameraMatches = !hasQuery || camera.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || camera.Model.Contains(query, StringComparison.OrdinalIgnoreCase);
+
+            var cameraRow = new CameraRow(camera, SelectCameraCommand)
+            {
+                IsSelected = camera.Serial == _selectedCameraSerial,
+                IsExpanded = camExpanded,
+            };
+
+            var childRows = new List<BrowseRow>();
+            if (camExpanded)
+            {
+                foreach (var date in camera.Dates)
+                {
+                    var dateExpanded = _expandedDates.Contains(date.Key) || hasQuery;
+                    var clipRows = new List<ClipRow>();
+                    if (dateExpanded)
+                    {
+                        foreach (var recording in date.Recordings)
+                        {
+                            var timeRange = FormatTimeRange(recording);
+                            if (hasQuery && !cameraMatches && !timeRange.Contains(query, StringComparison.OrdinalIgnoreCase)
+                                && !date.LongLabel.Contains(query, StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
+
+                            var clip = new ClipRow(camera, date, recording, timeRange, FormatClipDuration(recording), SelectClipCommand)
+                            {
+                                IsSelected = recording == Player.ActiveRecording,
+                            };
+                            _clipRows[recording] = clip;
+                            if (clip.IsSelected)
+                            {
+                                _highlightedClip = clip;
+                            }
+
+                            clipRows.Add(clip);
+                        }
+                    }
+
+                    if (hasQuery && clipRows.Count == 0 && !cameraMatches
+                        && !date.LongLabel.Contains(query, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    childRows.Add(new DateRow(camera, date, SelectDateCommand)
+                    {
+                        IsSelected = camera.Serial == _selectedCameraSerial && date.Key == _selectedDateKey,
+                        IsExpanded = dateExpanded,
+                    });
+                    childRows.AddRange(clipRows);
+                }
+            }
+
+            if (hasQuery && !cameraMatches && childRows.Count == 0)
+            {
+                continue;
+            }
+
+            Rows.Add(cameraRow);
+            foreach (var row in childRows)
+            {
+                Rows.Add(row);
+            }
+        }
+    }
+
+    partial void OnSearchTextChanged(string value) => RebuildRows();
+
+    [RelayCommand]
+    private void SelectCamera(CameraRow row)
+    {
+        var serial = row.Node.Serial;
+        if (!_expandedCameras.Remove(serial))
+        {
+            _expandedCameras.Add(serial);
+        }
+
+        _selectedCameraSerial = serial;
+        RebuildRows();
+    }
+
+    [RelayCommand]
+    private async Task SelectDate(DateRow row)
+    {
+        var key = row.Node.Key;
+        if (!_expandedDates.Remove(key))
+        {
+            _expandedDates.Add(key);
+        }
+
+        _selectedCameraSerial = row.Camera.Serial;
+        _selectedDateKey = key;
+        Player.ClearSelection();
+        RebuildRows();
+        await LoadActiveDay(seekFirst: true);
+    }
+
+    [RelayCommand]
+    private void SelectClip(ClipRow row)
+    {
+        _selectedCameraSerial = row.Camera.Serial;
+        _selectedDateKey = row.Date.Key;
+        Player.SeekToRecording(row.Recording);
+    }
+
+    private async Task LoadActiveDay(bool seekFirst)
+    {
+        if (_card is null)
+        {
+            return;
+        }
+
+        var camera = _cameras.FirstOrDefault(c => c.Serial == _selectedCameraSerial);
+        var date = camera?.Dates.FirstOrDefault(d => d.Key == _selectedDateKey);
+        if (camera is null || date is null)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        BusyText = "Reading recording details…";
+        try
+        {
+            await _card.LoadMetadataAsync(date.Recordings);
+
+            // Enrich the camera model from the actual camera-written MKV header, once known.
+            var model = date.Recordings
+                .SelectMany(r => r.Chunks)
+                .Select(c => c.Metadata?.WritingApp)
+                .FirstOrDefault(w => !string.IsNullOrWhiteSpace(w));
+            if (model is not null)
+            {
+                camera.Model = model;
+            }
+
+            await Player.LoadDay(_card, camera.Name, camera.Model, date.Date, date.Recordings);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Error reading recordings", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+            BusyText = "";
+        }
+    }
+
+    private void OnActiveRecordingChanged(Recording? recording)
+    {
+        if (_highlightedClip is not null)
+        {
+            _highlightedClip.IsSelected = false;
+            _highlightedClip = null;
+        }
+
+        if (recording is not null && _clipRows.TryGetValue(recording, out var row))
+        {
+            row.IsSelected = true;
+            _highlightedClip = row;
+        }
+    }
+
+    // --- export --------------------------------------------------------------
+
+    [RelayCommand]
+    private void OpenExport()
+    {
+        if (Player.HasSelection)
+        {
+            ShowExport = true;
+        }
+    }
+
+    [RelayCommand]
+    private void CloseExport() => ShowExport = false;
+
+    [RelayCommand]
+    private void SetExportFormat(string format) => ExportFormat = format;
+
+    [RelayCommand]
+    private void ToggleStamp() => IncludeStamp = !IncludeStamp;
+
+    [RelayCommand]
+    private async Task DoExport()
+    {
+        if (_card is null || !Player.HasSelection)
+        {
+            return;
+        }
+
+        var recordings = Player.RecordingsInSelection();
+        if (recordings.Count == 0)
+        {
+            MessageBox.Show("The selected range contains no recordings.", "Nothing to export",
+                MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -277,21 +508,30 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        ShowExport = false;
         IsBusy = true;
         try
         {
-            var progress = new Progress<Core.Export.ExportProgress>(p =>
-            {
-                var pct = p.BytesTotal > 0 ? p.BytesDone * 100 / p.BytesTotal : 0;
-                BusyText = $"Exporting {p.CurrentFile}  ({p.FilesDone}/{p.FilesTotal} files, {pct}%)";
-            });
-
             var fs = _card.FileSystem!;
-            var result = await _card.RunExclusive(() =>
-                Core.Export.RecordingExporter.Export(fs, item.Recording, dialog.FolderName, progress));
+            long totalBytes = 0;
+            var totalFiles = 0;
+            foreach (var recording in recordings)
+            {
+                var progress = new Progress<Core.Export.ExportProgress>(p =>
+                {
+                    var pct = p.BytesTotal > 0 ? p.BytesDone * 100 / p.BytesTotal : 0;
+                    BusyText = $"Exporting {p.CurrentFile} ({pct}%)";
+                });
+                var result = await _card.RunExclusive(() =>
+                    Core.Export.RecordingExporter.Export(fs, recording, dialog.FolderName, progress));
+                totalBytes += result.BytesExported;
+                totalFiles += result.FilesExported;
+            }
 
             MessageBox.Show(
-                $"Exported {result.FilesExported} files ({result.BytesExported / (1024.0 * 1024):F0} MB) to:\n{result.TargetDirectory}",
+                $"Exported {totalFiles} original recording file{(totalFiles == 1 ? "" : "s")} " +
+                $"({totalBytes / (1024.0 * 1024):F0} MB) to:\n{dialog.FolderName}\n\n" +
+                "Files are lossless copies of the on-card MKV recordings. The card was not modified.",
                 "Export complete", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
@@ -306,56 +546,72 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void CloseCard()
+    private void CloseCard() => CloseCardInternal();
+
+    private void CloseCardInternal()
     {
-        Player.Stop();
-        SelectedRecording = null;
-        Cameras.Clear();
+        Player.ClearSelection();
+        Rows.Clear();
+        _clipRows.Clear();
+        _cameras = [];
         IsCardOpen = false;
-        StatusBanner = "";
-        ProtectionDetails = "";
-        CardDescription = "";
         _card?.Dispose();
         _card = null;
     }
 
-    partial void OnSelectedRecordingChanged(RecordingItem? value)
+    // --- window commands -----------------------------------------------------
+
+    [RelayCommand]
+    private static void Minimize() =>
+        System.Windows.Application.Current.MainWindow.WindowState = WindowState.Minimized;
+
+    [RelayCommand]
+    private static void ToggleMaximize()
     {
-        if (value is not null)
-        {
-            _ = LoadAndPlayAsync(value);
-        }
+        var w = System.Windows.Application.Current.MainWindow;
+        w.WindowState = w.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
     }
 
-    private async Task LoadAndPlayAsync(RecordingItem item)
+    [RelayCommand]
+    private static void CloseWindow() => System.Windows.Application.Current.MainWindow.Close();
+
+    // --- helpers -------------------------------------------------------------
+
+    private static DateTime LocalDate(Recording r)
     {
-        if (_card is null)
+        var s = r.StartTime;
+        return (s.Kind == DateTimeKind.Utc ? s.ToLocalTime() : s).Date;
+    }
+
+    private static string FormatTimeRange(Recording r)
+    {
+        var start = r.StartTime.Kind == DateTimeKind.Utc ? r.StartTime.ToLocalTime() : r.StartTime;
+        var end = r.Duration is { } d ? start + d : start;
+        return $"{start:HH:mm} – {end:HH:mm}";
+    }
+
+    private static string FormatClipDuration(Recording r) =>
+        r.Duration is { } d ? DayPlayerViewModel.FormatDuration(d) : "—";
+
+    private static string FormatMac(string serial)
+    {
+        if (serial.Length != 12)
         {
-            return;
+            return serial;
         }
 
-        IsBusy = true;
-        BusyText = "Reading recording metadata...";
-        try
-        {
-            await _card.LoadMetadataAsync(item.Recording);
-            item.RefreshDetails();
-            await Player.Load(_card, item.Recording);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(ex.Message, "Error reading recording", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            IsBusy = false;
-            BusyText = "";
-        }
+        return string.Join(":", Enumerable.Range(0, 6).Select(i => serial.Substring(i * 2, 2)));
+    }
+
+    private static string FormatCapacity(long bytes)
+    {
+        var gb = bytes / (1024.0 * 1024 * 1024);
+        return gb >= 1000 ? $"{gb / 1024:F1} TB" : $"{gb:F0} GB";
     }
 
     public void Dispose()
     {
-        CloseCard();
+        CloseCardInternal();
         Player.Dispose();
         _watcher.Dispose();
     }
