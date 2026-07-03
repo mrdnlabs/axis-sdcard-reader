@@ -44,14 +44,11 @@ public sealed class StringEqualsConverter : IValueConverter
         throw new NotSupportedException();
 }
 
-/// <summary>Blue when the bound rate equals the ConverterParameter, else transparent (active speed fill).</summary>
+/// <summary>Accent brush when the bound rate equals the ConverterParameter, else transparent (active speed fill).</summary>
 public sealed class RateActiveBackgroundConverter : IValueConverter
 {
-    private static readonly Brush Active = Freeze("#2F6FED");
-    private static readonly Brush Inactive = Brushes.Transparent;
-
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        RateMatches(value, parameter) ? Active : Inactive;
+        RateMatches(value, parameter) ? Theme.Brush("Accent") : Brushes.Transparent;
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();
@@ -60,23 +57,23 @@ public sealed class RateActiveBackgroundConverter : IValueConverter
         double.TryParse(System.Convert.ToString(value, CultureInfo.InvariantCulture), NumberStyles.Any, CultureInfo.InvariantCulture, out var v)
         && double.TryParse(parameter?.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var p)
         && Math.Abs(v - p) < 0.0001;
-
-    internal static Brush Freeze(string hex)
-    {
-        var b = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
-        b.Freeze();
-        return b;
-    }
 }
 
-/// <summary>White when the bound rate equals the ConverterParameter, else muted grey (active speed text).</summary>
+/// <summary>White when the bound rate equals the ConverterParameter, else the muted token (active speed text).</summary>
 public sealed class RateActiveForegroundConverter : IValueConverter
 {
-    private static readonly Brush Active = RateActiveBackgroundConverter.Freeze("#FFFFFF");
-    private static readonly Brush Inactive = RateActiveBackgroundConverter.Freeze("#6B747F");
-
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        RateActiveBackgroundConverter.RateMatches(value, parameter) ? Active : Inactive;
+        RateActiveBackgroundConverter.RateMatches(value, parameter) ? Brushes.White : Theme.Brush("Text3");
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>True when the bound string equals the ConverterParameter (accent scheme dots).</summary>
+public sealed class AccentActiveConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        string.Equals(value?.ToString(), parameter?.ToString(), StringComparison.Ordinal);
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();

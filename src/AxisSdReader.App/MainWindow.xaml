@@ -10,7 +10,9 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="Axis SD Card Reader" Height="900" Width="1440" MinHeight="640" MinWidth="1040"
-        WindowStyle="None" ResizeMode="CanResize" Background="#EEF0F3"
+        WindowStyle="None" ResizeMode="CanResize"
+        Background="{DynamicResource T.Bg}"
+        Icon="Assets/AxisSDCardReader.ico"
         FontFamily="Segoe UI" TextOptions.TextFormattingMode="Display" UseLayoutRounding="True">
 
     <WindowChrome.WindowChrome>
@@ -20,10 +22,31 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
+        <!-- Brand mark: microSD silhouette + gold pins + play triangle (from icons/logo-mark.svg). -->
+        <ControlTemplate x:Key="LogoMark" TargetType="ContentControl">
+            <Viewbox Stretch="Uniform">
+                <Canvas Width="20" Height="26">
+                    <Path Data="M7,0.75 L19.25,0.75 L19.25,25.25 L0.75,25.25 L0.75,7 Z">
+                        <Path.Fill>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#3F7BF2" Offset="0" />
+                                <GradientStop Color="#1B4FD0" Offset="1" />
+                            </LinearGradientBrush>
+                        </Path.Fill>
+                    </Path>
+                    <Rectangle Canvas.Left="3.2" Canvas.Top="20.2" Width="1.7" Height="3.4" RadiusX="0.5" RadiusY="0.5" Fill="#F4C65A" />
+                    <Rectangle Canvas.Left="6.5" Canvas.Top="20.2" Width="1.7" Height="3.4" RadiusX="0.5" RadiusY="0.5" Fill="#F4C65A" />
+                    <Rectangle Canvas.Left="9.8" Canvas.Top="20.2" Width="1.7" Height="3.4" RadiusX="0.5" RadiusY="0.5" Fill="#F4C65A" />
+                    <Rectangle Canvas.Left="13.1" Canvas.Top="20.2" Width="1.7" Height="3.4" RadiusX="0.5" RadiusY="0.5" Fill="#F4C65A" />
+                    <Path Data="M8,8.5 L8,16 L14.5,12.25 Z" Fill="White" />
+                </Canvas>
+            </Viewbox>
+        </ControlTemplate>
+
         <!-- Caption buttons -->
         <Style x:Key="CaptionButton" TargetType="Button">
             <Setter Property="Width" Value="44" />
-            <Setter Property="Foreground" Value="#5B6470" />
+            <Setter Property="Foreground" Value="{DynamicResource T.Text3}" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True" />
@@ -35,7 +58,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="B" Property="Background" Value="#E9EBEF" />
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Hover}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -68,18 +91,18 @@
         <Style x:Key="RoundButton" TargetType="Button">
             <Setter Property="Width" Value="38" />
             <Setter Property="Height" Value="38" />
-            <Setter Property="Background" Value="#F7F8FA" />
+            <Setter Property="Background" Value="{DynamicResource T.Subtle}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="9"
-                                BorderBrush="#E2E7EF" BorderThickness="1">
+                                BorderBrush="{DynamicResource T.Border2}" BorderThickness="1">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="B" Property="Background" Value="#EEF1F6" />
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Hover}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -92,19 +115,42 @@
             <Setter Property="Height" Value="34" />
             <Setter Property="Padding" Value="12,0" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="#3A4048" />
-            <Setter Property="Background" Value="#F4F6F9" />
+            <Setter Property="Foreground" Value="{DynamicResource T.Text2}" />
+            <Setter Property="Background" Value="{DynamicResource T.Subtle}" />
             <Setter Property="FontSize" Value="12.5" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="8"
-                                BorderBrush="#E2E7EF" BorderThickness="1" Padding="{TemplateBinding Padding}">
+                                BorderBrush="{DynamicResource T.Border2}" BorderThickness="1" Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="B" Property="Background" Value="#EEF1F6" />
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Hover}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Small square zoom-stepper button -->
+        <Style x:Key="StepperButton" TargetType="Button">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource T.Text2}" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" Background="Transparent" CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Hover}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -123,24 +169,32 @@
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Path x:Name="Caret" Grid.Column="0" Width="6" Height="8" Margin="0,0,9,0"
-                                      VerticalAlignment="Center" Fill="#9AA3AE" Data="M0,0 L6,4 L0,8 Z"
+                                      VerticalAlignment="Center" Fill="{DynamicResource T.Muted3}" Data="M0,0 L6,4 L0,8 Z"
                                       RenderTransformOrigin="0.4,0.5" />
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                     <TextBlock x:Name="Name" Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
-                                               Foreground="#28303A" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding Model}" FontSize="11" Foreground="#96A0AB"
+                                               Foreground="{DynamicResource T.Text}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Model}" FontSize="11" Foreground="{DynamicResource T.Muted2}"
                                                TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
-                                <Border Grid.Column="2" Background="#EEF1F5" CornerRadius="10" Padding="8,1" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Badge}" FontSize="11" Foreground="#96A0AB" />
+                                <Border Grid.Column="2" Background="{DynamicResource T.AccentTint2}"
+                                        BorderBrush="{DynamicResource T.AccentTint}" BorderThickness="1"
+                                        CornerRadius="5" Padding="6,1" Margin="0,0,6,0" VerticalAlignment="Center"
+                                        Visibility="{Binding IsMultiLens, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding LensTag}" FontSize="10" FontWeight="Bold"
+                                               Foreground="{DynamicResource T.AccentInk}" />
+                                </Border>
+                                <Border Grid.Column="3" Background="{DynamicResource T.Chip}" CornerRadius="10" Padding="8,1" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Badge}" FontSize="11" Foreground="{DynamicResource T.Muted2}" />
                                 </Border>
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="B" Property="Background" Value="#EEF1F5" />
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Hover}" />
                             </Trigger>
                             <DataTrigger Binding="{Binding IsExpanded}" Value="True">
                                 <Setter TargetName="Caret" Property="RenderTransform">
@@ -150,9 +204,9 @@
                                 </Setter>
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                <Setter TargetName="B" Property="Background" Value="#E7EFFC" />
-                                <Setter TargetName="Name" Property="Foreground" Value="#1A4FC0" />
-                                <Setter TargetName="Caret" Property="Fill" Value="#2F6FED" />
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentTint}" />
+                                <Setter TargetName="Name" Property="Foreground" Value="{DynamicResource T.AccentInk}" />
+                                <Setter TargetName="Caret" Property="Fill" Value="{DynamicResource T.AccentInk}" />
                             </DataTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -172,17 +226,17 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Path x:Name="Caret" Grid.Column="0" Width="6" Height="8" Margin="0,0,9,0"
-                                      VerticalAlignment="Center" Fill="#B3BCC7" Data="M0,0 L6,4 L0,8 Z"
+                                      VerticalAlignment="Center" Fill="{DynamicResource T.Faint}" Data="M0,0 L6,4 L0,8 Z"
                                       RenderTransformOrigin="0.4,0.5" />
                                 <TextBlock x:Name="Label" Grid.Column="1" Text="{Binding Label}" FontSize="12.5"
-                                           FontWeight="Medium" Foreground="#4A525C" VerticalAlignment="Center" />
+                                           FontWeight="Medium" Foreground="{DynamicResource T.Text2}" VerticalAlignment="Center" />
                                 <TextBlock Grid.Column="2" Text="{Binding ClipsLabel}" FontSize="10.5"
-                                           Foreground="#9AA3AE" VerticalAlignment="Center" />
+                                           Foreground="{DynamicResource T.Muted3}" VerticalAlignment="Center" />
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="B" Property="Background" Value="#F0F2F6" />
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Hover}" />
                             </Trigger>
                             <DataTrigger Binding="{Binding IsExpanded}" Value="True">
                                 <Setter TargetName="Caret" Property="RenderTransform">
@@ -192,8 +246,8 @@
                                 </Setter>
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                <Setter TargetName="B" Property="Background" Value="#EEF4FD" />
-                                <Setter TargetName="Label" Property="Foreground" Value="#1F2328" />
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentTint2}" />
+                                <Setter TargetName="Label" Property="Foreground" Value="{DynamicResource T.Text}" />
                                 <Setter TargetName="Label" Property="FontWeight" Value="SemiBold" />
                             </DataTrigger>
                         </ControlTemplate.Triggers>
@@ -214,23 +268,58 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <Rectangle x:Name="Dot" Grid.Column="0" Width="7" Height="7" RadiusX="2" RadiusY="2"
-                                           Margin="0,0,9,0" VerticalAlignment="Center" Fill="#2F6FED" />
+                                           Margin="0,0,9,0" VerticalAlignment="Center" Fill="{DynamicResource T.Accent}" />
                                 <TextBlock x:Name="Range" Grid.Column="1" Text="{Binding TimeRange}"
                                            FontFamily="{StaticResource MonoFont}" FontSize="12" FontWeight="SemiBold"
-                                           Foreground="#28303A" VerticalAlignment="Center" />
+                                           Foreground="{DynamicResource T.Text}" VerticalAlignment="Center" />
                                 <TextBlock x:Name="Dur" Grid.Column="2" Text="{Binding Duration}" FontSize="10.5"
-                                           Foreground="#96A0AB" VerticalAlignment="Center" />
+                                           Foreground="{DynamicResource T.Muted2}" VerticalAlignment="Center" />
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="B" Property="Background" Value="#F0F2F6" />
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Hover}" />
                             </Trigger>
                             <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                <Setter TargetName="B" Property="Background" Value="#2F6FED" />
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Accent}" />
                                 <Setter TargetName="Range" Property="Foreground" Value="White" />
                                 <Setter TargetName="Dur" Property="Foreground" Value="#CCFFFFFF" />
                                 <Setter TargetName="Dot" Property="Fill" Value="White" />
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+        </DataTemplate>
+
+        <!-- Lens tab -->
+        <DataTemplate DataType="{x:Type vm:LensTab}">
+            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Margin="0,0,8,0">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" Height="36" CornerRadius="9" Padding="9,0,14,0"
+                                Background="{DynamicResource T.Subtle}" BorderBrush="{DynamicResource T.Border2}" BorderThickness="1.5">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border x:Name="Badge" Width="20" Height="20" CornerRadius="5"
+                                        Background="{DynamicResource T.Chip}" Margin="0,0,9,0">
+                                    <TextBlock x:Name="Num" Text="{Binding Number}" FontFamily="{StaticResource MonoFont}"
+                                               FontSize="11" FontWeight="Bold" Foreground="{DynamicResource T.Muted2}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock x:Name="Lbl" Text="{Binding Label}" FontSize="12.5" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource T.Text2}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Hover}" />
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentTint}" />
+                                <Setter TargetName="B" Property="BorderBrush" Value="{DynamicResource T.Accent}" />
+                                <Setter TargetName="Badge" Property="Background" Value="{DynamicResource T.Accent}" />
+                                <Setter TargetName="Num" Property="Foreground" Value="White" />
+                                <Setter TargetName="Lbl" Property="Foreground" Value="{DynamicResource T.AccentInk}" />
                             </DataTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -248,18 +337,21 @@
         </Grid.RowDefinitions>
 
         <!-- Title bar -->
-        <Border Grid.Row="0" Background="#F7F8FA" BorderBrush="#E2E5E9" BorderThickness="0,0,0,1">
+        <Border Grid.Row="0" Background="{DynamicResource T.Panel2}" BorderBrush="{DynamicResource T.Border}" BorderThickness="0,0,0,1">
             <DockPanel LastChildFill="False">
-                <Border DockPanel.Dock="Left" Width="16" Height="16" CornerRadius="3" Margin="12,0,10,0">
-                    <Border.Background>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                            <GradientStop Color="#2F6FED" Offset="0" />
-                            <GradientStop Color="#1B4FD0" Offset="1" />
-                        </LinearGradientBrush>
-                    </Border.Background>
-                </Border>
+                <Button DockPanel.Dock="Left" Width="26" Height="24" Margin="9,0,4,0" Cursor="Hand"
+                        Command="{Binding ReplayIntroCommand}" ToolTip="Replay intro"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True" Background="Transparent" BorderThickness="0">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="Transparent" Padding="5,3">
+                                <ContentControl Template="{StaticResource LogoMark}" />
+                            </Border>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
                 <TextBlock DockPanel.Dock="Left" Text="Axis SD Card Reader" VerticalAlignment="Center"
-                           FontSize="12" FontWeight="SemiBold" Foreground="#3A4048" />
+                           FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource T.Text2}" />
                 <Button DockPanel.Dock="Right" Style="{StaticResource CloseCaptionButton}" Command="{Binding CloseWindowCommand}">
                     <TextBlock Text="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="10" />
                 </Button>
@@ -273,28 +365,28 @@
         </Border>
 
         <!-- Toolbar -->
-        <Border Grid.Row="1" Background="White" BorderBrush="#E2E5E9" BorderThickness="0,0,0,1"
+        <Border Grid.Row="1" Background="{DynamicResource T.Panel}" BorderBrush="{DynamicResource T.Border}" BorderThickness="0,0,0,1"
                 Visibility="{Binding IsCardOpen, Converter={StaticResource BoolToVis}}">
             <DockPanel LastChildFill="False" Margin="16,0">
                 <!-- Card identity -->
-                <Border DockPanel.Dock="Left" Width="34" Height="34" CornerRadius="7" Background="#F0F3F8"
-                        BorderBrush="#E2E7EF" BorderThickness="1" Margin="0,0,11,0">
-                    <Border Width="15" Height="11" CornerRadius="2" Background="#2F6FED" />
+                <Border DockPanel.Dock="Left" Width="34" Height="34" CornerRadius="7" Background="{DynamicResource T.Subtle}"
+                        BorderBrush="{DynamicResource T.Border2}" BorderThickness="1" Margin="0,0,11,0">
+                    <ContentControl Template="{StaticResource LogoMark}" Width="13" Height="17" />
                 </Border>
                 <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,16,0">
-                    <TextBlock Text="{Binding CardTitle}" FontSize="13" FontWeight="SemiBold" Foreground="#1F2328" />
-                    <TextBlock Text="{Binding CardSubtitle}" FontSize="11.5" Foreground="#6B747F" />
+                    <TextBlock Text="{Binding CardTitle}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource T.Text}" />
+                    <TextBlock Text="{Binding CardSubtitle}" FontSize="11.5" Foreground="{DynamicResource T.Text3}" />
                 </StackPanel>
 
                 <!-- Trust indicator -->
-                <Border DockPanel.Dock="Left" Background="#EAF6EF" BorderBrush="#BFE4CF" BorderThickness="1"
-                        CornerRadius="8" Padding="11,7,13,7" VerticalAlignment="Center">
+                <Border DockPanel.Dock="Left" Background="{DynamicResource T.TrustBg}" BorderBrush="{DynamicResource T.TrustBorder}"
+                        BorderThickness="1" CornerRadius="8" Padding="11,7,13,7" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE72E;" FontFamily="Segoe MDL2 Assets" FontSize="15" Foreground="#1A8A5A"
+                        <TextBlock Text="&#xE72E;" FontFamily="Segoe MDL2 Assets" FontSize="15" Foreground="{DynamicResource T.Trust}"
                                    VerticalAlignment="Center" Margin="0,0,9,0" />
                         <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="Card locked · Read-only" FontSize="12.5" FontWeight="Bold" Foreground="#136C46" />
-                            <TextBlock Text="Footage cannot be changed or deleted" FontSize="10.5" Foreground="#2F8A63" />
+                            <TextBlock Text="Card locked · Read-only" FontSize="12.5" FontWeight="Bold" Foreground="{DynamicResource T.TrustText}" />
+                            <TextBlock Text="Footage cannot be changed or deleted" FontSize="10.5" Foreground="{DynamicResource T.TrustText2}" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -304,7 +396,7 @@
                         Cursor="Hand" IsEnabled="{Binding Player.HasSelection}" VerticalAlignment="Center">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
-                            <Border x:Name="B" CornerRadius="9" Background="#2F6FED" Padding="{TemplateBinding Padding}">
+                            <Border x:Name="B" CornerRadius="9" Background="{DynamicResource T.Accent}" Padding="{TemplateBinding Padding}">
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBlock Text="&#xE898;" FontFamily="Segoe MDL2 Assets" FontSize="14"
                                                Foreground="White" x:Name="Ico" Margin="0,0,9,0" />
@@ -313,16 +405,16 @@
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsEnabled" Value="False">
-                                    <Setter TargetName="B" Property="Background" Value="#EEF0F3" />
-                                    <Setter TargetName="Ico" Property="Foreground" Value="#B3BCC7" />
-                                    <Setter TargetName="Txt" Property="Foreground" Value="#B3BCC7" />
+                                    <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Chip}" />
+                                    <Setter TargetName="Ico" Property="Foreground" Value="{DynamicResource T.Disabled}" />
+                                    <Setter TargetName="Txt" Property="Foreground" Value="{DynamicResource T.Disabled}" />
                                 </Trigger>
                                 <MultiTrigger>
                                     <MultiTrigger.Conditions>
                                         <Condition Property="IsEnabled" Value="True" />
                                         <Condition Property="IsMouseOver" Value="True" />
                                     </MultiTrigger.Conditions>
-                                    <Setter TargetName="B" Property="Background" Value="#215FE0" />
+                                    <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentH}" />
                                 </MultiTrigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -330,14 +422,16 @@
                 </Button>
 
                 <!-- Search -->
-                <Border DockPanel.Dock="Right" Width="240" Height="34" Background="#F4F6F9" BorderBrush="#E2E7EF"
-                        BorderThickness="1" CornerRadius="8" Padding="12,0" VerticalAlignment="Center" Margin="0,0,12,0">
+                <Border DockPanel.Dock="Right" Width="240" Height="34" Background="{DynamicResource T.Subtle}"
+                        BorderBrush="{DynamicResource T.Border2}" BorderThickness="1" CornerRadius="8" Padding="12,0"
+                        VerticalAlignment="Center" Margin="0,0,12,0">
                     <Grid>
-                        <TextBlock Text="Search cameras &amp; times…" FontSize="12.5" Foreground="#98A1AB"
+                        <TextBlock Text="Search cameras &amp; times…" FontSize="12.5" Foreground="{DynamicResource T.Muted3}"
                                    VerticalAlignment="Center"
                                    Visibility="{Binding SearchHasText, Converter={StaticResource InverseBoolToVis}}" />
                         <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0"
-                                 Background="Transparent" VerticalAlignment="Center" FontSize="12.5" Foreground="#1F2328" />
+                                 Background="Transparent" VerticalAlignment="Center" FontSize="12.5"
+                                 Foreground="{DynamicResource T.Text}" CaretBrush="{DynamicResource T.Text}" />
                     </Grid>
                 </Border>
             </DockPanel>
@@ -352,19 +446,19 @@
                 </Grid.ColumnDefinitions>
 
                 <!-- Sidebar -->
-                <Border Grid.Column="0" Background="#F7F8FA" BorderBrush="#E2E5E9" BorderThickness="0,0,1,0">
+                <Border Grid.Column="0" Background="{DynamicResource T.Panel2}" BorderBrush="{DynamicResource T.Border}" BorderThickness="0,0,1,0">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="42" />
                             <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <Border Grid.Row="0" BorderBrush="#EAECEF" BorderThickness="0,0,0,1" Padding="16,0,14,0">
+                        <Border Grid.Row="0" BorderBrush="{DynamicResource T.Border3}" BorderThickness="0,0,0,1" Padding="16,0,14,0">
                             <DockPanel LastChildFill="False">
                                 <TextBlock DockPanel.Dock="Left" Text="RECORDINGS BY CAMERA" FontSize="11" FontWeight="Bold"
-                                           Foreground="#8A929C" VerticalAlignment="Center" />
+                                           Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding CamCountLabel}" FontSize="11"
-                                           Foreground="#9AA3AE" VerticalAlignment="Center" />
+                                           Foreground="{DynamicResource T.Muted3}" VerticalAlignment="Center" />
                             </DockPanel>
                         </Border>
                         <ListBox Grid.Row="1" ItemsSource="{Binding Rows}" BorderThickness="0" Background="Transparent"
@@ -386,53 +480,79 @@
                                 </Style>
                             </ListBox.ItemContainerStyle>
                         </ListBox>
-                        <Border Grid.Row="2" BorderBrush="#EAECEF" BorderThickness="0,1,0,0" Background="#FBFBFC" Padding="16,11">
-                            <TextBlock FontSize="11" Foreground="#8A929C" TextWrapping="Wrap">
+                        <Border Grid.Row="2" BorderBrush="{DynamicResource T.Border3}" BorderThickness="0,1,0,0"
+                                Background="{DynamicResource T.Panel3}" Padding="16,11">
+                            <TextBlock FontSize="11" Foreground="{DynamicResource T.Muted}" TextWrapping="Wrap">
                                 <Run Text="Recorded footage spans " /><LineBreak />
-                                <Run Text="{Binding FootageSpanLabel}" Foreground="#4A525C" FontWeight="SemiBold" />
+                                <Run Text="{Binding FootageSpanLabel}" Foreground="{DynamicResource T.Text2}" FontWeight="SemiBold" />
                             </TextBlock>
                         </Border>
                     </Grid>
                 </Border>
 
                 <!-- Main -->
-                <Grid Grid.Column="1" Background="#E7E9ED">
+                <Grid Grid.Column="1" Background="{DynamicResource T.Body}">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="46" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <!-- Now-playing header -->
-                    <Border Grid.Row="0" Background="White" BorderBrush="#E2E5E9" BorderThickness="0,0,0,1" Padding="18,0">
+                    <Border Grid.Row="0" Background="{DynamicResource T.Panel}" BorderBrush="{DynamicResource T.Border}"
+                            BorderThickness="0,0,0,1" Padding="18,0">
                         <DockPanel LastChildFill="False">
-                            <Ellipse DockPanel.Dock="Left" Width="8" Height="8" Fill="#2F6FED" VerticalAlignment="Center" Margin="0,0,12,0" />
+                            <Ellipse DockPanel.Dock="Left" Width="8" Height="8" Fill="{DynamicResource T.Accent}"
+                                     VerticalAlignment="Center" Margin="0,0,12,0" />
                             <TextBlock DockPanel.Dock="Left" Text="{Binding Player.CameraName}" FontSize="13.5"
-                                       FontWeight="SemiBold" Foreground="#1F2328" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                       FontWeight="SemiBold" Foreground="{DynamicResource T.Text}" VerticalAlignment="Center" Margin="0,0,12,0" />
                             <TextBlock DockPanel.Dock="Left" Text="{Binding Player.CameraModel}" FontSize="12"
-                                       Foreground="#9AA3AE" VerticalAlignment="Center" Margin="0,0,12,0" />
-                            <Border DockPanel.Dock="Left" Width="1" Height="16" Background="#E2E5E9" Margin="0,0,12,0" />
+                                       Foreground="{DynamicResource T.Muted3}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                            <Border DockPanel.Dock="Left" Width="1" Height="16" Background="{DynamicResource T.Border}" Margin="0,0,12,0" />
                             <TextBlock DockPanel.Dock="Left" Text="{Binding Player.PositionDateLong}" FontSize="13"
-                                       Foreground="#5B6470" VerticalAlignment="Center" />
+                                       Foreground="{DynamicResource T.Text3}" VerticalAlignment="Center" />
                             <TextBlock DockPanel.Dock="Right" Text="{Binding Player.SegCountLabel}" FontSize="11.5"
-                                       Foreground="#8A929C" VerticalAlignment="Center" />
+                                       Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Lens bar (multi-lens cameras only) -->
+                    <Border Grid.Row="1" Height="52" Background="{DynamicResource T.Panel}" BorderBrush="{DynamicResource T.Border}"
+                            BorderThickness="0,0,0,1" Padding="18,0"
+                            Visibility="{Binding ShowLensBar, Converter={StaticResource BoolToVis}}">
+                        <DockPanel LastChildFill="False">
+                            <Grid DockPanel.Dock="Left" Width="15" Height="15" Margin="0,0,8,0" VerticalAlignment="Center">
+                                <Ellipse Stroke="{DynamicResource T.Muted}" StrokeThickness="1.6" />
+                                <Ellipse Width="4" Height="4" Fill="{DynamicResource T.Muted}" />
+                            </Grid>
+                            <TextBlock DockPanel.Dock="Left" Text="LENS VIEW" FontSize="11" FontWeight="Bold"
+                                       Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" Margin="0,0,14,0" />
+                            <ItemsControl DockPanel.Dock="Left" ItemsSource="{Binding LensTabs}" VerticalAlignment="Center">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Ellipse Width="6" Height="6" Fill="{DynamicResource T.Trust}" VerticalAlignment="Center" Margin="0,0,7,0" />
+                                <TextBlock Text="{Binding LensHint}" FontSize="11.5" Foreground="{DynamicResource T.Muted2}" VerticalAlignment="Center" />
+                            </StackPanel>
                         </DockPanel>
                     </Border>
 
                     <!-- Video surface -->
-                    <Grid Grid.Row="1" Margin="20">
-                        <Border MaxWidth="1000" Background="#0D0F12" CornerRadius="6">
+                    <Grid Grid.Row="2" Margin="20">
+                        <Border MaxWidth="1000" Background="{DynamicResource T.Video}" BorderBrush="{DynamicResource T.VideoBorder}"
+                                BorderThickness="1" CornerRadius="6">
                             <Border.Effect>
-                                <DropShadowEffect BlurRadius="30" ShadowDepth="8" Direction="270" Opacity="0.28" Color="#141A23" />
+                                <DropShadowEffect BlurRadius="30" ShadowDepth="8" Direction="270" Opacity="0.35" Color="Black" />
                             </Border.Effect>
                             <Grid>
-                                <!-- Real video render surface. Kept in the visual tree from the start so
-                                     it owns its native HWND before playback begins (creating it lazily makes
-                                     libvlc spawn its own detached output window). The ~1s HWND init is hidden
-                                     behind the OS splash screen at startup. -->
                                 <vlc:VideoView x:Name="VideoView" MediaPlayer="{Binding Player.MediaPlayer}"
                                                Visibility="{Binding Player.HasFootage, Converter={StaticResource BoolToVis}}" />
-                                <!-- No-recording gap state -->
+                                <!-- Gap state (colors fixed: the video area is always dark) -->
                                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
                                             Visibility="{Binding Player.NoFootage, Converter={StaticResource BoolToVis}}">
                                     <Grid Width="46" Height="46" Margin="0,0,0,16" HorizontalAlignment="Center">
@@ -472,38 +592,80 @@
                     </Grid>
 
                     <!-- Timeline + transport -->
-                    <Border Grid.Row="2" Background="White" BorderBrush="#E2E5E9" BorderThickness="0,1,0,0" Padding="22,14,22,18">
+                    <Border Grid.Row="3" Background="{DynamicResource T.Panel}" BorderBrush="{DynamicResource T.Border}"
+                            BorderThickness="0,1,0,0" Padding="22,13,22,18">
                         <StackPanel>
-                            <!-- Timeline header -->
-                            <DockPanel LastChildFill="False" Margin="0,0,0,6">
+                            <!-- Row A: title + window + legend + zoom -->
+                            <DockPanel LastChildFill="False" Margin="0,0,0,9">
                                 <TextBlock DockPanel.Dock="Left" Text="TIMELINE" FontSize="11" FontWeight="Bold"
-                                           Foreground="#8A929C" VerticalAlignment="Center" />
-                                <TextBlock DockPanel.Dock="Left" Text="drag to scrub · scroll to zoom" FontSize="11"
-                                           Foreground="#B3BCC7" VerticalAlignment="Center" Margin="12,0,0,0" />
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
-                                        <Border Width="12" Height="6" CornerRadius="2" Background="#2F6FED" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                        <TextBlock Text="Recording" FontSize="11" Foreground="#8A929C" VerticalAlignment="Center" />
+                                           Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
+                                <TextBlock DockPanel.Dock="Left" Text="{Binding Player.WindowLabel}" FontSize="12"
+                                           FontFamily="{StaticResource MonoFont}" Foreground="{DynamicResource T.Text3}"
+                                           VerticalAlignment="Center" Margin="14,0,0,0" />
+                                <Button DockPanel.Dock="Right" Command="{Binding Player.FitDayCommand}" Cursor="Hand" Height="32" Margin="10,0,0,0">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="B" CornerRadius="8" Padding="12,0" Background="{DynamicResource T.Subtle}"
+                                                    BorderBrush="{DynamicResource T.Border2}" BorderThickness="1">
+                                                <TextBlock x:Name="T" Text="Full day" FontSize="12" FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource T.Text2}" VerticalAlignment="Center" />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Hover}" />
+                                                </Trigger>
+                                                <DataTrigger Binding="{Binding Player.IsFullDay}" Value="True">
+                                                    <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentTint}" />
+                                                    <Setter TargetName="B" Property="BorderBrush" Value="{DynamicResource T.Accent}" />
+                                                    <Setter TargetName="T" Property="Foreground" Value="{DynamicResource T.AccentInk}" />
+                                                </DataTrigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                                <Border DockPanel.Dock="Right" Background="{DynamicResource T.Subtle}" BorderBrush="{DynamicResource T.Border2}"
+                                        BorderThickness="1" CornerRadius="8" Padding="3" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Style="{StaticResource StepperButton}" Content="−" Command="{Binding Player.ZoomOutCommand}" ToolTip="Zoom out" />
+                                        <TextBlock Text="{Binding Player.SpanLabel}" MinWidth="62" TextAlignment="Center"
+                                                   FontSize="12" FontWeight="SemiBold" FontFamily="{StaticResource MonoFont}"
+                                                   Foreground="{DynamicResource T.Text2}" VerticalAlignment="Center" />
+                                        <Button Style="{StaticResource StepperButton}" Content="+" Command="{Binding Player.ZoomInCommand}" ToolTip="Zoom in" />
                                     </StackPanel>
+                                </Border>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,14,0">
                                     <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
-                                        <Border Width="12" Height="6" CornerRadius="2" Background="#E6E9EE" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                        <TextBlock Text="No footage" FontSize="11" Foreground="#8A929C" VerticalAlignment="Center" />
+                                        <Border Width="12" Height="6" CornerRadius="2" Background="{DynamicResource T.Accent}"
+                                                VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <TextBlock Text="Recording" FontSize="11" Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
                                     </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Visibility="{Binding Player.HasSelection, Converter={StaticResource BoolToVis}}">
-                                        <Border Width="12" Height="6" CornerRadius="2" Background="#F7C948" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                        <TextBlock Text="Export range" FontSize="11" Foreground="#8A929C" VerticalAlignment="Center" />
+                                    <StackPanel Orientation="Horizontal"
+                                                Visibility="{Binding Player.HasSelection, Converter={StaticResource BoolToVis}}">
+                                        <Border Width="12" Height="6" CornerRadius="2" Background="{DynamicResource T.Sel}"
+                                                VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <TextBlock Text="Export range" FontSize="11" Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </StackPanel>
                             </DockPanel>
 
+                            <!-- Day overview -->
+                            <ctrl:DayOverviewControl x:Name="Overview" Margin="0,0,0,9"
+                                                     SegmentsSource="{Binding Player.TimelineSegments}"
+                                                     CenterSeconds="{Binding Player.CurrentSeconds, Mode=OneWay}"
+                                                     SpanSeconds="{Binding Player.SpanSeconds, Mode=OneWay}"
+                                                     SelInSeconds="{Binding Player.SelInSeconds}"
+                                                     SelOutSeconds="{Binding Player.SelOutSeconds}" />
+
+                            <!-- Detail track -->
                             <ctrl:TimelineControl x:Name="Timeline"
                                                   SegmentsSource="{Binding Player.TimelineSegments}"
                                                   CenterSeconds="{Binding Player.CurrentSeconds, Mode=OneWay}"
+                                                  SpanSeconds="{Binding Player.SpanSeconds, Mode=TwoWay}"
                                                   SelInSeconds="{Binding Player.SelInSeconds}"
                                                   SelOutSeconds="{Binding Player.SelOutSeconds}" />
 
                             <!-- Transport -->
-                            <Grid Margin="0,12,0,0">
+                            <Grid Margin="0,11,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
@@ -514,17 +676,17 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
-                                <!-- prev / play / next -->
                                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Button Style="{StaticResource RoundButton}" Command="{Binding Player.StepPrevCommand}" ToolTip="Previous clip">
-                                        <TextBlock Text="&#xE892;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="#3A4048" />
+                                        <TextBlock Text="&#xE892;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="{DynamicResource T.Text2}" />
                                     </Button>
                                     <Button Width="52" Height="52" Cursor="Hand" Margin="8,0" Command="{Binding Player.TogglePlayCommand}">
                                         <Button.Template>
                                             <ControlTemplate TargetType="Button">
-                                                <Border x:Name="B" Width="52" Height="52" CornerRadius="26" Background="#2F6FED">
+                                                <Border x:Name="B" Width="52" Height="52" CornerRadius="26" Background="{DynamicResource T.Accent}">
                                                     <Border.Effect>
-                                                        <DropShadowEffect BlurRadius="12" ShadowDepth="4" Direction="270" Opacity="0.32" Color="#2F6FED" />
+                                                        <DropShadowEffect BlurRadius="12" ShadowDepth="4" Direction="270" Opacity="0.4"
+                                                                          Color="{DynamicResource T.AccentColor}" />
                                                     </Border.Effect>
                                                     <Grid>
                                                         <TextBlock Text="&#xE769;" FontFamily="Segoe MDL2 Assets" FontSize="20" Foreground="White"
@@ -537,29 +699,28 @@
                                                 </Border>
                                                 <ControlTemplate.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter TargetName="B" Property="Background" Value="#215FE0" />
+                                                        <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentH}" />
                                                     </Trigger>
                                                 </ControlTemplate.Triggers>
                                             </ControlTemplate>
                                         </Button.Template>
                                     </Button>
                                     <Button Style="{StaticResource RoundButton}" Command="{Binding Player.StepNextCommand}" ToolTip="Next clip">
-                                        <TextBlock Text="&#xE893;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="#3A4048" />
+                                        <TextBlock Text="&#xE893;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="{DynamicResource T.Text2}" />
                                     </Button>
                                 </StackPanel>
 
-                                <!-- clock -->
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="16,0,0,0">
                                     <TextBlock Text="{Binding Player.ClockString}" FontFamily="{StaticResource MonoFont}"
-                                               FontSize="20" FontWeight="SemiBold" Foreground="#1F2328" />
-                                    <TextBlock FontSize="11" Foreground="#96A0AB">
+                                               FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource T.Text}" />
+                                    <TextBlock FontSize="11" Foreground="{DynamicResource T.Muted2}">
                                         <Run Text="of " /><Run Text="{Binding Player.PositionDateShort, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Player.StatusLabel, Mode=OneWay}" />
                                     </TextBlock>
                                 </StackPanel>
 
                                 <!-- speed -->
-                                <Border Grid.Column="3" Background="#F4F6F9" BorderBrush="#E2E7EF" BorderThickness="1"
-                                        CornerRadius="9" Padding="4" VerticalAlignment="Center" Margin="0,0,16,0">
+                                <Border Grid.Column="3" Background="{DynamicResource T.Subtle}" BorderBrush="{DynamicResource T.Border2}"
+                                        BorderThickness="1" CornerRadius="9" Padding="4" VerticalAlignment="Center" Margin="0,0,16,0">
                                     <StackPanel Orientation="Horizontal">
                                         <StackPanel.Resources>
                                             <Style TargetType="Button" x:Key="SpeedButton">
@@ -601,32 +762,35 @@
                                 </Border>
 
                                 <!-- mute -->
-                                <Button Grid.Column="4" Style="{StaticResource RoundButton}" Command="{Binding Player.ToggleMuteCommand}" ToolTip="Mute" Margin="0,0,16,0">
+                                <Button Grid.Column="4" Style="{StaticResource RoundButton}" Command="{Binding Player.ToggleMuteCommand}"
+                                        ToolTip="Mute" Margin="0,0,16,0">
                                     <Grid>
-                                        <TextBlock Text="&#xE767;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="#3A4048"
+                                        <TextBlock Text="&#xE767;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="{DynamicResource T.Text2}"
                                                    Visibility="{Binding Player.IsMuted, Converter={StaticResource InverseBoolToVis}}" />
                                         <TextBlock Text="&#xE74F;" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="#E0564E"
                                                    Visibility="{Binding Player.IsMuted, Converter={StaticResource BoolToVis}}" />
                                     </Grid>
                                 </Button>
 
-                                <Border Grid.Column="5" Width="1" Height="32" Background="#E6E9EE" VerticalAlignment="Center" Margin="0,0,16,0" />
+                                <Border Grid.Column="5" Width="1" Height="32" Background="{DynamicResource T.Hair}"
+                                        VerticalAlignment="Center" Margin="0,0,16,0" />
 
                                 <!-- mark in/out -->
                                 <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Button Style="{StaticResource ToolbarButton}" Height="38" Command="{Binding Player.MarkInCommand}" Margin="0,0,8,0">
                                         <StackPanel Orientation="Horizontal">
-                                            <Path Width="8" Height="12" Fill="#F7C948" Data="M0,0 L8,6 L0,12 Z" VerticalAlignment="Center" Margin="0,0,7,0" />
-                                            <TextBlock Text="Mark in" FontSize="12.5" FontWeight="SemiBold" Foreground="#3A4048" />
+                                            <Path Width="8" Height="12" Fill="{DynamicResource T.Sel}" Data="M0,0 L8,6 L0,12 Z"
+                                                  VerticalAlignment="Center" Margin="0,0,7,0" />
+                                            <TextBlock Text="Mark in" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource T.Text2}" />
                                         </StackPanel>
                                     </Button>
                                     <Button Style="{StaticResource ToolbarButton}" Height="38" Command="{Binding Player.MarkOutCommand}" Margin="0,0,10,0">
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="Mark out" FontSize="12.5" FontWeight="SemiBold" Foreground="#3A4048" Margin="0,0,7,0" />
-                                            <Path Width="8" Height="12" Fill="#F7C948" Data="M8,0 L0,6 L8,12 Z" VerticalAlignment="Center" />
+                                            <TextBlock Text="Mark out" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource T.Text2}" Margin="0,0,7,0" />
+                                            <Path Width="8" Height="12" Fill="{DynamicResource T.Sel}" Data="M8,0 L0,6 L8,12 Z" VerticalAlignment="Center" />
                                         </StackPanel>
                                     </Button>
-                                    <TextBlock Text="{Binding Player.SelectionLabel}" FontSize="12" Foreground="#96A0AB"
+                                    <TextBlock Text="{Binding Player.SelectionLabel}" FontSize="12" Foreground="{DynamicResource T.Muted2}"
                                                MinWidth="118" VerticalAlignment="Center" />
                                 </StackPanel>
                             </Grid>
@@ -636,58 +800,143 @@
             </Grid>
 
             <!-- Waiting / no-card state -->
-            <Border Background="#EEF0F3" Visibility="{Binding ShowWaiting, Converter={StaticResource BoolToVis}}">
+            <Border Background="{DynamicResource T.Bg}" Visibility="{Binding ShowWaiting, Converter={StaticResource BoolToVis}}">
                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="440">
-                    <Border Width="56" Height="56" CornerRadius="12" HorizontalAlignment="Center" Margin="0,0,0,20">
-                        <Border.Background>
-                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                <GradientStop Color="#2F6FED" Offset="0" />
-                                <GradientStop Color="#1B4FD0" Offset="1" />
-                            </LinearGradientBrush>
-                        </Border.Background>
-                        <TextBlock Text="&#xE7F1;" FontFamily="Segoe MDL2 Assets" FontSize="26" Foreground="White"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Border Width="56" Height="56" CornerRadius="12" HorizontalAlignment="Center" Margin="0,0,0,20"
+                            Background="{DynamicResource T.Panel}" BorderBrush="{DynamicResource T.Border}" BorderThickness="1">
+                        <ContentControl Template="{StaticResource LogoMark}" Width="24" Height="31" />
                     </Border>
-                    <TextBlock Text="{Binding WaitingMessage}" FontSize="15" Foreground="#5B6470" TextAlignment="Center"
+                    <TextBlock Text="{Binding WaitingMessage}" FontSize="15" Foreground="{DynamicResource T.Text3}" TextAlignment="Center"
                                TextWrapping="Wrap" HorizontalAlignment="Center" />
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20,0,0">
                         <Button Style="{StaticResource ToolbarButton}" Content="Scan again" Command="{Binding ScanAndOpenCommand}" Margin="0,0,10,0" />
                         <Button Style="{StaticResource ToolbarButton}" Content="Open image…" Command="{Binding OpenImageCommand}" />
                     </StackPanel>
-                    <TextBlock Text="{Binding BusyText}" FontSize="12" Foreground="#8A929C" HorizontalAlignment="Center"
+                    <TextBlock Text="{Binding BusyText}" FontSize="12" Foreground="{DynamicResource T.Muted}" HorizontalAlignment="Center"
                                Margin="0,16,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" />
                 </StackPanel>
             </Border>
 
-            <!-- Busy overlay (when a card is open) -->
-            <Border Background="#66000000" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"
-                    d:IsHidden="True">
-                <Border Background="White" CornerRadius="10" Padding="28,20" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="{Binding BusyText}" FontSize="13" Foreground="#3A4048" VerticalAlignment="Center" />
-                    </StackPanel>
+            <!-- Busy overlay -->
+            <Border Background="{DynamicResource T.Scrim}" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
+                <Border Background="{DynamicResource T.Panel}" CornerRadius="10" Padding="28,20"
+                        BorderBrush="{DynamicResource T.Border}" BorderThickness="1"
+                        HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding BusyText}" FontSize="13" Foreground="{DynamicResource T.Text2}" VerticalAlignment="Center" />
                 </Border>
             </Border>
         </Grid>
 
         <!-- Status bar -->
-        <Border Grid.Row="3" Background="#F2F3F6" BorderBrush="#E2E5E9" BorderThickness="0,1,0,0" Padding="14,0"
-                Visibility="{Binding IsCardOpen, Converter={StaticResource BoolToVis}}">
+        <Border Grid.Row="3" Background="{DynamicResource T.Statusbar}" BorderBrush="{DynamicResource T.Border}"
+                BorderThickness="0,1,0,0" Padding="14,0">
             <DockPanel LastChildFill="False">
-                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Ellipse Width="7" Height="7" Fill="#1A8A5A" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <TextBlock Text="{Binding MountLabel}" FontSize="11" Foreground="#7D8691" VerticalAlignment="Center" />
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center"
+                            Visibility="{Binding IsCardOpen, Converter={StaticResource BoolToVis}}">
+                    <Ellipse Width="7" Height="7" Fill="{DynamicResource T.Trust}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <TextBlock Text="{Binding MountLabel}" FontSize="11" Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
                 </StackPanel>
-                <TextBlock DockPanel.Dock="Right" Text="Index complete" FontSize="11" Foreground="#7D8691" VerticalAlignment="Center" Margin="16,0,0,0" />
-                <TextBlock DockPanel.Dock="Right" FontSize="11" Foreground="#7D8691" VerticalAlignment="Center">
+
+                <!-- Theme + accent switcher -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
+                    <Button Command="{Binding ToggleThemeCommand}" Cursor="Hand" ToolTip="Toggle dark / light theme"
+                            Background="Transparent" BorderThickness="0" Padding="4,0">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                                    <Grid>
+                                        <TextBlock Text="&#xE706;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                                   Foreground="{DynamicResource T.Muted}"
+                                                   Visibility="{Binding IsDarkTheme, Converter={StaticResource BoolToVis}}" />
+                                        <TextBlock Text="&#xE708;" FontFamily="Segoe MDL2 Assets" FontSize="12"
+                                                   Foreground="{DynamicResource T.Muted}"
+                                                   Visibility="{Binding IsDarkTheme, Converter={StaticResource InverseBoolToVis}}" />
+                                    </Grid>
+                                </Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                        <StackPanel.Resources>
+                            <Style TargetType="Button" x:Key="AccentDot">
+                                <Setter Property="Width" Value="17" />
+                                <Setter Property="Height" Value="17" />
+                                <Setter Property="Margin" Value="3,0" />
+                                <Setter Property="Cursor" Value="Hand" />
+                                <Setter Property="Command" Value="{Binding SetAccentCommand}" />
+                                <Setter Property="BorderBrush" Value="Transparent" />
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="Button">
+                                            <Grid>
+                                                <Ellipse Stroke="{TemplateBinding BorderBrush}" StrokeThickness="1.5" />
+                                                <Ellipse Fill="{TemplateBinding Background}" Margin="4" />
+                                            </Grid>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </StackPanel.Resources>
+                        <Button Background="#3B82F6" CommandParameter="Trust Blue" ToolTip="Trust Blue">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource AccentDot}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding AccentName}" Value="Trust Blue">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource T.Muted2}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Background="#14B8A6" CommandParameter="Secure Teal" ToolTip="Secure Teal">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource AccentDot}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding AccentName}" Value="Secure Teal">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource T.Muted2}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Background="#8B5CF6" CommandParameter="Signal Violet" ToolTip="Signal Violet">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource AccentDot}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding AccentName}" Value="Signal Violet">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource T.Muted2}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Background="#F59E0B" CommandParameter="Amber Alert" ToolTip="Amber Alert">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource AccentDot}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding AccentName}" Value="Amber Alert">
+                                            <Setter Property="BorderBrush" Value="{DynamicResource T.Muted2}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+
+                <TextBlock DockPanel.Dock="Right" Text="Index complete" FontSize="11" Foreground="{DynamicResource T.Muted}"
+                           VerticalAlignment="Center" Margin="16,0,0,0"
+                           Visibility="{Binding IsCardOpen, Converter={StaticResource BoolToVis}}" />
+                <TextBlock DockPanel.Dock="Right" FontSize="11" Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center"
+                           Visibility="{Binding IsCardOpen, Converter={StaticResource BoolToVis}}">
                     <Run Text="{Binding RecCountLabel, Mode=OneWay}" /><Run Text=" indexed" />
                 </TextBlock>
             </DockPanel>
         </Border>
 
         <!-- Export dialog -->
-        <Grid Grid.RowSpan="4" Background="#571C2128" Visibility="{Binding ShowExport, Converter={StaticResource BoolToVis}}">
-            <!-- Scrim: clicking outside the card closes -->
+        <Grid Grid.RowSpan="4" Background="{DynamicResource T.Scrim}"
+              Visibility="{Binding ShowExport, Converter={StaticResource BoolToVis}}">
             <Button Command="{Binding CloseExportCommand}" Background="Transparent" BorderThickness="0" Cursor="Arrow">
                 <Button.Template>
                     <ControlTemplate TargetType="Button">
@@ -695,17 +944,19 @@
                     </ControlTemplate>
                 </Button.Template>
             </Button>
-            <Border Width="520" Background="White" CornerRadius="12" VerticalAlignment="Center" HorizontalAlignment="Center">
+            <Border Width="520" Background="{DynamicResource T.Panel}" CornerRadius="12"
+                    BorderBrush="{DynamicResource T.Border}" BorderThickness="1"
+                    VerticalAlignment="Center" HorizontalAlignment="Center">
                 <Border.Effect>
-                    <DropShadowEffect BlurRadius="70" ShadowDepth="24" Direction="270" Opacity="0.4" Color="#0F141C" />
+                    <DropShadowEffect BlurRadius="70" ShadowDepth="24" Direction="270" Opacity="0.45" Color="Black" />
                 </Border.Effect>
                 <StackPanel>
                     <StackPanel Margin="24,20,24,16">
-                        <TextBlock Text="Export footage" FontSize="17" FontWeight="Bold" Foreground="#1F2328" />
+                        <TextBlock Text="Export footage" FontSize="17" FontWeight="Bold" Foreground="{DynamicResource T.Text}" />
                         <TextBlock Text="A copy is written to your PC. The card is never modified." FontSize="12.5"
-                                   Foreground="#7D8691" Margin="0,3,0,0" />
+                                   Foreground="{DynamicResource T.Muted}" Margin="0,3,0,0" />
                     </StackPanel>
-                    <Border BorderBrush="#EEF0F3" BorderThickness="0,1,0,0" Padding="24,20">
+                    <Border BorderBrush="{DynamicResource T.Border3}" BorderThickness="0,1,0,0" Padding="24,20">
                         <StackPanel>
                             <Grid Margin="0,0,0,16">
                                 <Grid.ColumnDefinitions>
@@ -713,81 +964,82 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
-                                    <TextBlock Text="CAMERA" FontSize="11" FontWeight="Bold" Foreground="#8A929C" Margin="0,0,0,6" />
-                                    <TextBlock Text="{Binding Player.CameraName}" FontSize="13.5" FontWeight="SemiBold" Foreground="#1F2328" />
-                                    <TextBlock Text="{Binding Player.CameraModel}" FontSize="12" Foreground="#96A0AB" />
+                                    <TextBlock Text="CAMERA" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource T.Muted}" Margin="0,0,0,6" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Player.CameraName}" FontSize="13.5" FontWeight="SemiBold" Foreground="{DynamicResource T.Text}" />
+                                        <TextBlock Text="{Binding Player.LensLabel, StringFormat=' · {0}'}" FontSize="13.5"
+                                                   Foreground="{DynamicResource T.Muted2}"
+                                                   Visibility="{Binding ShowLensBar, Converter={StaticResource BoolToVis}}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding Player.CameraModel}" FontSize="12" Foreground="{DynamicResource T.Muted2}" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1">
-                                    <TextBlock Text="RANGE" FontSize="11" FontWeight="Bold" Foreground="#8A929C" Margin="0,0,0,6" />
+                                    <TextBlock Text="RANGE" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource T.Muted}" Margin="0,0,0,6" />
                                     <TextBlock Text="{Binding Player.SelectionRangeText}" FontSize="13.5" FontWeight="SemiBold"
-                                               Foreground="#1F2328" FontFamily="{StaticResource MonoFont}" />
-                                    <TextBlock FontSize="12" Foreground="#96A0AB">
+                                               Foreground="{DynamicResource T.Text}" FontFamily="{StaticResource MonoFont}" />
+                                    <TextBlock FontSize="12" Foreground="{DynamicResource T.Muted2}">
                                         <Run Text="{Binding Player.SelectionDurationText, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Player.PositionDateShort, Mode=OneWay}" />
                                     </TextBlock>
                                 </StackPanel>
                             </Grid>
 
-                            <TextBlock Text="FORMAT" FontSize="11" FontWeight="Bold" Foreground="#8A929C" Margin="0,0,0,8" />
+                            <TextBlock Text="FORMAT" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource T.Muted}" Margin="0,0,0,8" />
                             <UniformGrid Columns="3" Margin="0,0,0,16">
-                                <UniformGrid.Resources>
-                                    <Style TargetType="Button" x:Key="FormatCard">
-                                        <Setter Property="Cursor" Value="Hand" />
-                                        <Setter Property="Margin" Value="0,0,8,0" />
-                                        <Setter Property="HorizontalContentAlignment" Value="Left" />
-                                    </Style>
-                                </UniformGrid.Resources>
-                                <Button Style="{StaticResource FormatCard}" Command="{Binding SetExportFormatCommand}" CommandParameter="mp4">
+                                <Button Cursor="Hand" Margin="0,0,8,0" Command="{Binding SetExportFormatCommand}" CommandParameter="mp4">
                                     <Button.Template>
                                         <ControlTemplate TargetType="Button">
-                                            <Border x:Name="B" CornerRadius="9" Background="#F7F8FA" BorderBrush="#E6E9EE" BorderThickness="1.5" Padding="13,11">
+                                            <Border x:Name="B" CornerRadius="9" Background="{DynamicResource T.Subtle}"
+                                                    BorderBrush="{DynamicResource T.Hair}" BorderThickness="1.5" Padding="13,11">
                                                 <StackPanel>
-                                                    <TextBlock x:Name="T" Text="MP4" FontSize="13" FontWeight="Bold" Foreground="#3A4048" />
-                                                    <TextBlock Text="H.264 · universal" FontSize="11" Foreground="#96A0AB" Margin="0,2,0,0" />
+                                                    <TextBlock x:Name="T" Text="MP4" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource T.Text2}" />
+                                                    <TextBlock Text="H.264 · universal" FontSize="11" Foreground="{DynamicResource T.Muted2}" Margin="0,2,0,0" />
                                                 </StackPanel>
                                             </Border>
                                             <ControlTemplate.Triggers>
                                                 <DataTrigger Binding="{Binding ExportFormat}" Value="mp4">
-                                                    <Setter TargetName="B" Property="Background" Value="#EEF4FD" />
-                                                    <Setter TargetName="B" Property="BorderBrush" Value="#2F6FED" />
-                                                    <Setter TargetName="T" Property="Foreground" Value="#1A4FC0" />
+                                                    <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentTint2}" />
+                                                    <Setter TargetName="B" Property="BorderBrush" Value="{DynamicResource T.Accent}" />
+                                                    <Setter TargetName="T" Property="Foreground" Value="{DynamicResource T.AccentInk}" />
                                                 </DataTrigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
                                     </Button.Template>
                                 </Button>
-                                <Button Style="{StaticResource FormatCard}" Command="{Binding SetExportFormatCommand}" CommandParameter="mkv">
+                                <Button Cursor="Hand" Margin="0,0,8,0" Command="{Binding SetExportFormatCommand}" CommandParameter="mkv">
                                     <Button.Template>
                                         <ControlTemplate TargetType="Button">
-                                            <Border x:Name="B" CornerRadius="9" Background="#F7F8FA" BorderBrush="#E6E9EE" BorderThickness="1.5" Padding="13,11">
+                                            <Border x:Name="B" CornerRadius="9" Background="{DynamicResource T.Subtle}"
+                                                    BorderBrush="{DynamicResource T.Hair}" BorderThickness="1.5" Padding="13,11">
                                                 <StackPanel>
-                                                    <TextBlock x:Name="T" Text="MKV" FontSize="13" FontWeight="Bold" Foreground="#3A4048" />
-                                                    <TextBlock Text="original streams" FontSize="11" Foreground="#96A0AB" Margin="0,2,0,0" />
+                                                    <TextBlock x:Name="T" Text="MKV" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource T.Text2}" />
+                                                    <TextBlock Text="original streams" FontSize="11" Foreground="{DynamicResource T.Muted2}" Margin="0,2,0,0" />
                                                 </StackPanel>
                                             </Border>
                                             <ControlTemplate.Triggers>
                                                 <DataTrigger Binding="{Binding ExportFormat}" Value="mkv">
-                                                    <Setter TargetName="B" Property="Background" Value="#EEF4FD" />
-                                                    <Setter TargetName="B" Property="BorderBrush" Value="#2F6FED" />
-                                                    <Setter TargetName="T" Property="Foreground" Value="#1A4FC0" />
+                                                    <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentTint2}" />
+                                                    <Setter TargetName="B" Property="BorderBrush" Value="{DynamicResource T.Accent}" />
+                                                    <Setter TargetName="T" Property="Foreground" Value="{DynamicResource T.AccentInk}" />
                                                 </DataTrigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
                                     </Button.Template>
                                 </Button>
-                                <Button Style="{StaticResource FormatCard}" Margin="0" Command="{Binding SetExportFormatCommand}" CommandParameter="asf">
+                                <Button Cursor="Hand" Command="{Binding SetExportFormatCommand}" CommandParameter="asf">
                                     <Button.Template>
                                         <ControlTemplate TargetType="Button">
-                                            <Border x:Name="B" CornerRadius="9" Background="#F7F8FA" BorderBrush="#E6E9EE" BorderThickness="1.5" Padding="13,11">
+                                            <Border x:Name="B" CornerRadius="9" Background="{DynamicResource T.Subtle}"
+                                                    BorderBrush="{DynamicResource T.Hair}" BorderThickness="1.5" Padding="13,11">
                                                 <StackPanel>
-                                                    <TextBlock x:Name="T" Text="ASF" FontSize="13" FontWeight="Bold" Foreground="#3A4048" />
-                                                    <TextBlock Text="Axis native" FontSize="11" Foreground="#96A0AB" Margin="0,2,0,0" />
+                                                    <TextBlock x:Name="T" Text="ASF" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource T.Text2}" />
+                                                    <TextBlock Text="Axis native" FontSize="11" Foreground="{DynamicResource T.Muted2}" Margin="0,2,0,0" />
                                                 </StackPanel>
                                             </Border>
                                             <ControlTemplate.Triggers>
                                                 <DataTrigger Binding="{Binding ExportFormat}" Value="asf">
-                                                    <Setter TargetName="B" Property="Background" Value="#EEF4FD" />
-                                                    <Setter TargetName="B" Property="BorderBrush" Value="#2F6FED" />
-                                                    <Setter TargetName="T" Property="Foreground" Value="#1A4FC0" />
+                                                    <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentTint2}" />
+                                                    <Setter TargetName="B" Property="BorderBrush" Value="{DynamicResource T.Accent}" />
+                                                    <Setter TargetName="T" Property="Foreground" Value="{DynamicResource T.AccentInk}" />
                                                 </DataTrigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
@@ -795,21 +1047,22 @@
                                 </Button>
                             </UniformGrid>
 
-                            <Button Command="{Binding ToggleStampCommand}" HorizontalAlignment="Left" Cursor="Hand" Margin="0,0,0,0">
+                            <Button Command="{Binding ToggleStampCommand}" HorizontalAlignment="Left" Cursor="Hand">
                                 <Button.Template>
                                     <ControlTemplate TargetType="Button">
                                         <StackPanel Orientation="Horizontal" Background="Transparent">
                                             <Border x:Name="Box" Width="19" Height="19" CornerRadius="5" BorderThickness="1.5"
-                                                    BorderBrush="#C4CAD3" Background="White" Margin="0,0,10,0">
+                                                    BorderBrush="{DynamicResource T.Border2}" Background="Transparent" Margin="0,0,10,0">
                                                 <TextBlock x:Name="Check" Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" FontSize="11"
                                                            Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
                                             </Border>
-                                            <TextBlock Text="Burn timestamp &amp; camera name into exported video" FontSize="13" Foreground="#3A4048" VerticalAlignment="Center" />
+                                            <TextBlock Text="Burn timestamp &amp; camera name into exported video" FontSize="13"
+                                                       Foreground="{DynamicResource T.Text2}" VerticalAlignment="Center" />
                                         </StackPanel>
                                         <ControlTemplate.Triggers>
                                             <DataTrigger Binding="{Binding IncludeStamp}" Value="True">
-                                                <Setter TargetName="Box" Property="Background" Value="#2F6FED" />
-                                                <Setter TargetName="Box" Property="BorderBrush" Value="#2F6FED" />
+                                                <Setter TargetName="Box" Property="Background" Value="{DynamicResource T.Accent}" />
+                                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource T.Accent}" />
                                                 <Setter TargetName="Check" Property="Visibility" Value="Visible" />
                                             </DataTrigger>
                                         </ControlTemplate.Triggers>
@@ -817,28 +1070,29 @@
                                 </Button.Template>
                             </Button>
 
-                            <Border Background="#EAF6EF" BorderBrush="#CBE8D8" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,16,0,0">
+                            <Border Background="{DynamicResource T.TrustBg}" BorderBrush="{DynamicResource T.TrustBorder}"
+                                    BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,16,0,0">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="#1A8A5A"
+                                    <TextBlock Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="{DynamicResource T.Trust}"
                                                VerticalAlignment="Center" Margin="0,0,9,0" />
                                     <TextBlock Text="Export preserves original quality and metadata for evidentiary use."
-                                               FontSize="12" Foreground="#2F7A56" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                               FontSize="12" Foreground="{DynamicResource T.TrustText2}" VerticalAlignment="Center" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>
                     </Border>
-                    <Border BorderBrush="#EEF0F3" BorderThickness="0,1,0,0" Padding="24,16">
+                    <Border BorderBrush="{DynamicResource T.Border3}" BorderThickness="0,1,0,0" Padding="24,16">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                             <Button Style="{StaticResource ToolbarButton}" Height="40" Content="Cancel" Command="{Binding CloseExportCommand}" Margin="0,0,10,0" />
                             <Button Height="40" Padding="22,0" Cursor="Hand" Command="{Binding DoExportCommand}">
                                 <Button.Template>
                                     <ControlTemplate TargetType="Button">
-                                        <Border x:Name="B" CornerRadius="9" Background="#2F6FED" Padding="{TemplateBinding Padding}">
+                                        <Border x:Name="B" CornerRadius="9" Background="{DynamicResource T.Accent}" Padding="{TemplateBinding Padding}">
                                             <TextBlock Text="Export video" FontSize="13" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" />
                                         </Border>
                                         <ControlTemplate.Triggers>
                                             <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter TargetName="B" Property="Background" Value="#215FE0" />
+                                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentH}" />
                                             </Trigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>
@@ -849,5 +1103,105 @@
                 </StackPanel>
             </Border>
         </Grid>
+
+        <!-- Splash / mount + index overlay -->
+        <Border Grid.RowSpan="4" Background="{DynamicResource T.Bg}" Cursor="Hand"
+                Visibility="{Binding BootVisible, Converter={StaticResource BoolToVis}}">
+            <Border.InputBindings>
+                <MouseBinding MouseAction="LeftClick" Command="{Binding SkipBootCommand}" />
+            </Border.InputBindings>
+            <StackPanel Width="460" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Grid Width="84" Height="84" Margin="0,0,0,26" HorizontalAlignment="Center">
+                    <Border x:Name="PulseRing" CornerRadius="22" BorderBrush="{DynamicResource T.Accent}" BorderThickness="2"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform>
+                            <ScaleTransform x:Name="PulseScale" />
+                        </Border.RenderTransform>
+                        <Border.Triggers>
+                            <EventTrigger RoutedEvent="Border.Loaded">
+                                <BeginStoryboard>
+                                    <Storyboard RepeatBehavior="Forever" Duration="0:0:2.2">
+                                        <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX" From="1" To="1.35" Duration="0:0:2.2" />
+                                        <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY" From="1" To="1.35" Duration="0:0:2.2" />
+                                        <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0.9" To="0" Duration="0:0:2.2" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </EventTrigger>
+                        </Border.Triggers>
+                    </Border>
+                    <Border CornerRadius="22" Background="{DynamicResource T.Panel}" BorderBrush="{DynamicResource T.Border}" BorderThickness="1">
+                        <ContentControl Template="{StaticResource LogoMark}" Width="40" Height="52" />
+                    </Border>
+                </Grid>
+
+                <TextBlock Text="Axis SD Card Reader" FontSize="22" FontWeight="Bold" Foreground="{DynamicResource T.Text}"
+                           HorizontalAlignment="Center" />
+                <TextBlock Text="Secure evidence viewer" FontSize="12.5" Foreground="{DynamicResource T.Muted}"
+                           HorizontalAlignment="Center" Margin="0,4,0,0" />
+
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,34,0,0">
+                    <Grid Width="16" Height="16" Margin="0,0,10,0" VerticalAlignment="Center">
+                        <!-- spinner while working -->
+                        <Path Stroke="{DynamicResource T.Accent}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Data="M 8,1.5 A 6.5,6.5 0 0 1 14.5,8" RenderTransformOrigin="0.5,0.5"
+                              Visibility="{Binding BootDone, Converter={StaticResource InverseBoolToVis}}">
+                            <Path.RenderTransform>
+                                <RotateTransform />
+                            </Path.RenderTransform>
+                            <Path.Triggers>
+                                <EventTrigger RoutedEvent="Path.Loaded">
+                                    <BeginStoryboard>
+                                        <Storyboard RepeatBehavior="Forever">
+                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.Angle" From="0" To="360" Duration="0:0:0.8" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </EventTrigger>
+                            </Path.Triggers>
+                        </Path>
+                        <!-- check when done -->
+                        <Grid Visibility="{Binding BootDone, Converter={StaticResource BoolToVis}}">
+                            <Ellipse Fill="{DynamicResource T.Trust}" />
+                            <TextBlock Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" FontSize="9" Foreground="#05130C"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
+                    </Grid>
+                    <TextBlock Text="{Binding BootStageLabel}" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{DynamicResource T.Text2}" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <ProgressBar Minimum="0" Maximum="1" Value="{Binding BootFraction}" Height="6" Margin="0,16,0,0">
+                    <ProgressBar.Template>
+                        <ControlTemplate TargetType="ProgressBar">
+                            <Grid>
+                                <Border x:Name="PART_Track" Background="{DynamicResource T.Subtle2}"
+                                        BorderBrush="{DynamicResource T.TlBorder}" BorderThickness="1" CornerRadius="3" />
+                                <Border x:Name="PART_Indicator" Background="{DynamicResource T.Accent}" CornerRadius="3"
+                                        HorizontalAlignment="Left" />
+                            </Grid>
+                        </ControlTemplate>
+                    </ProgressBar.Template>
+                </ProgressBar>
+                <DockPanel Margin="0,8,0,0" LastChildFill="False">
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding BootDetail}" FontSize="11.5"
+                               FontFamily="{StaticResource MonoFont}" Foreground="{DynamicResource T.Muted2}" />
+                    <TextBlock DockPanel.Dock="Right" FontSize="11.5" FontFamily="{StaticResource MonoFont}"
+                               Foreground="{DynamicResource T.Muted2}"
+                               Text="{Binding BootFraction, StringFormat={}{0:P0}}" />
+                </DockPanel>
+
+                <Border Background="{DynamicResource T.TrustBg}" BorderBrush="{DynamicResource T.TrustBorder}" BorderThickness="1"
+                        CornerRadius="9" Padding="15,10" Margin="0,34,0,0" HorizontalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE72E;" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{DynamicResource T.Trust}"
+                                   VerticalAlignment="Center" Margin="0,0,9,0" />
+                        <TextBlock Text="Opened read-only — nothing will be written to the card" FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource T.TrustText}" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="{Binding BootFooter}" FontSize="11" Foreground="{DynamicResource T.Faint}"
+                           HorizontalAlignment="Center" Margin="0,22,0,0" />
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>

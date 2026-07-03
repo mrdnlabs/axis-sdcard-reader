@@ -11,61 +11,43 @@ namespace AxisSdReader.App.Controls;
 public sealed record TimelineSegment(double StartSeconds, double EndSeconds);
 
 /// <summary>
-/// Scrolling, zoomable timeline with a fixed center playhead. The strip of time slides
-/// beneath the playhead: drag to scrub (the view model is notified live and seeks on
-/// release), mouse-wheel to zoom from a multi-day overview down to minutes. Time is
-/// continuous — midnight is just a stronger tick with a date label.
+/// The detail track: a scrolling window of time beneath a stationary center cursor
+/// (DVR-style). Drag to scrub, click to jump, mouse-wheel to step through the fixed zoom
+/// spans. Wide-enough segments carry an inline "start · duration" label. All colors come
+/// from the theme tokens and refresh on theme change.
 /// </summary>
 public sealed class TimelineControl : FrameworkElement
 {
-    private const double TrackHeight = 46.0;
-    private const double LabelGap = 3.0;
-    private const double LabelHeight = 16.0;
-    private const double MinSecondsPerPixel = 0.05;   // ~70s visible at 1400px
-    private const double MaxSecondsPerPixel = 450;    // ~7.3 days visible at 1400px
+    /// <summary>Fixed zoom spans (seconds across the full track width): 5m · 15m · 30m · 1h · 3h · 6h · 24h.</summary>
+    public static readonly double[] Spans = [300, 900, 1800, 3600, 10800, 21600, 86400];
+
+    private const double HandleZone = 13;   // space above the track for the top triangle handle
+    private const double TrackHeight = 52;
+    private const double LabelGap = 3;
+    private const double LabelHeight = 15;
     private const double ClickDragThresholdPx = 4;
 
-    private static readonly Brush TrackFill = Frozen("#F0F2F5");
-    private static readonly Pen TrackBorder = FrozenPen("#E4E7EC", 1);
-    private static readonly Pen GridPen = FrozenPen("#E0E4EA", 1);
-    private static readonly Pen DayGridPen = FrozenPen("#C6CCD6", 1);
-    private static readonly Brush SegmentFill = Frozen("#2F6FED");
-    private static readonly Pen SegmentInset = FrozenPen("#2EFFFFFF", 1);
-    private static readonly Brush SelectionFill = Frozen("#52F7C948");
-    private static readonly Pen SelectionBorder = FrozenPen("#F7C948", 1.5);
-    private static readonly Brush PlayheadFill = Frozen("#12203A");
-    private static readonly Pen PlayheadHalo = FrozenPen("#99FFFFFF", 1);
-    private static readonly Brush LabelBrush = Frozen("#A2ABB5");
-    private static readonly Brush DayLabelBrush = Frozen("#6B747F");
     private static readonly Typeface MonoFace = new("Consolas");
-    private static readonly Typeface MonoBoldFace = new(new FontFamily("Consolas"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal);
-
-    private static readonly double[] TickSteps =
-        [60, 120, 300, 600, 900, 1800, 3600, 2 * 3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400];
 
     private bool _dragging;
     private double _dragStartX;
     private double _dragStartCenter;
     private double _dragTotalDeltaPx;
 
-    /// <summary>Raised while dragging with the previewed center time (display only).</summary>
     public event Action<double>? Scrubbing;
-
-    /// <summary>Raised when a scrub/click completes with the final time to seek to.</summary>
     public event Action<double>? ScrubCommitted;
 
     public static readonly DependencyProperty SegmentsSourceProperty = DependencyProperty.Register(
         nameof(SegmentsSource), typeof(IEnumerable), typeof(TimelineControl),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
 
-    /// <summary>Time under the fixed center playhead (TimeAxis seconds).</summary>
     public static readonly DependencyProperty CenterSecondsProperty = DependencyProperty.Register(
         nameof(CenterSeconds), typeof(double), typeof(TimelineControl),
         new FrameworkPropertyMetadata(0.0, FrameworkPropertyMetadataOptions.AffectsRender));
 
-    public static readonly DependencyProperty SecondsPerPixelProperty = DependencyProperty.Register(
-        nameof(SecondsPerPixel), typeof(double), typeof(TimelineControl),
-        new FrameworkPropertyMetadata(30.0, FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty SpanSecondsProperty = DependencyProperty.Register(
+        nameof(SpanSeconds), typeof(double), typeof(TimelineControl),
+        new FrameworkPropertyMetadata(1800.0, FrameworkPropertyMetadataOptions.AffectsRender | FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
 
     public static readonly DependencyProperty SelInSecondsProperty = DependencyProperty.Register(
         nameof(SelInSeconds), typeof(double?), typeof(TimelineControl),
@@ -87,10 +69,10 @@ public sealed class TimelineControl : FrameworkElement
         set => SetValue(CenterSecondsProperty, value);
     }
 
-    public double SecondsPerPixel
+    public double SpanSeconds
     {
-        get => (double)GetValue(SecondsPerPixelProperty);
-        set => SetValue(SecondsPerPixelProperty, value);
+        get => (double)GetValue(SpanSecondsProperty);
+        set => SetValue(SpanSecondsProperty, value);
     }
 
     public double? SelInSeconds
@@ -107,15 +89,16 @@ public sealed class TimelineControl : FrameworkElement
 
     public TimelineControl()
     {
-        MinHeight = TrackHeight + LabelGap + LabelHeight;
+        MinHeight = HandleZone + TrackHeight + LabelGap + LabelHeight;
         Cursor = Cursors.SizeWE;
-        ToolTip = "Drag to scrub · scroll to zoom";
+        ToolTip = "Drag to scrub · click to jump · scroll to zoom";
+        Theme.Changed += InvalidateVisual;
     }
 
     protected override Size MeasureOverride(Size availableSize)
     {
         var width = double.IsInfinity(availableSize.Width) ? 600 : availableSize.Width;
-        return new Size(width, TrackHeight + LabelGap + LabelHeight);
+        return new Size(width, HandleZone + TrackHeight + LabelGap + LabelHeight);
     }
 
     // --- interaction ----------------------------------------------------------
@@ -140,10 +123,8 @@ public sealed class TimelineControl : FrameworkElement
 
         var deltaPx = e.GetPosition(this).X - _dragStartX;
         _dragTotalDeltaPx = Math.Max(_dragTotalDeltaPx, Math.Abs(deltaPx));
-
-        // Dragging the strip right moves the view into the past (content follows the hand).
-        // SetCurrentValue keeps the CenterSeconds binding alive for after the drag.
-        var newCenter = _dragStartCenter - deltaPx * SecondsPerPixel;
+        var spp = SpanSeconds / Math.Max(1, ActualWidth);
+        var newCenter = _dragStartCenter - deltaPx * spp;
         SetCurrentValue(CenterSecondsProperty, newCenter);
         Scrubbing?.Invoke(newCenter);
     }
@@ -161,10 +142,9 @@ public sealed class TimelineControl : FrameworkElement
 
         if (_dragTotalDeltaPx < ClickDragThresholdPx)
         {
-            // A plain click: bring the clicked time to the playhead.
             var x = e.GetPosition(this).X;
-            var clicked = CenterSeconds + (x - ActualWidth / 2) * SecondsPerPixel;
-            ScrubCommitted?.Invoke(clicked);
+            var spp = SpanSeconds / Math.Max(1, ActualWidth);
+            ScrubCommitted?.Invoke(CenterSeconds + (x - ActualWidth / 2) * spp);
         }
         else
         {
@@ -175,10 +155,30 @@ public sealed class TimelineControl : FrameworkElement
     protected override void OnMouseWheel(MouseWheelEventArgs e)
     {
         base.OnMouseWheel(e);
-        var factor = Math.Pow(1.3, -e.Delta / 120.0);
-        SetCurrentValue(SecondsPerPixelProperty,
-            Math.Clamp(SecondsPerPixel * factor, MinSecondsPerPixel, MaxSecondsPerPixel));
+        StepSpan(e.Delta > 0 ? -1 : +1);
         e.Handled = true;
+    }
+
+    /// <summary>Steps to the next/previous fixed zoom span (also used by the zoom stepper buttons).</summary>
+    public void StepSpan(int direction)
+    {
+        var index = NearestSpanIndex(SpanSeconds) + direction;
+        index = Math.Clamp(index, 0, Spans.Length - 1);
+        SetCurrentValue(SpanSecondsProperty, Spans[index]);
+    }
+
+    public static int NearestSpanIndex(double span)
+    {
+        var best = 0;
+        for (var i = 1; i < Spans.Length; i++)
+        {
+            if (Math.Abs(Spans[i] - span) < Math.Abs(Spans[best] - span))
+            {
+                best = i;
+            }
+        }
+
+        return best;
     }
 
     // --- rendering ------------------------------------------------------------
@@ -191,39 +191,48 @@ public sealed class TimelineControl : FrameworkElement
             return;
         }
 
-        var spp = SecondsPerPixel;
-        var leftSeconds = CenterSeconds - width / 2 * spp;
-        var rightSeconds = CenterSeconds + width / 2 * spp;
+        var span = SpanSeconds;
+        var spp = span / width;
+        var leftSeconds = CenterSeconds - span / 2;
+        var rightSeconds = CenterSeconds + span / 2;
+        var trackTop = HandleZone;
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
 
-        dc.PushClip(new RectangleGeometry(new Rect(0, -2, width, TrackHeight + LabelGap + LabelHeight + 4)));
+        var trackFill = Theme.Brush("Subtle2");
+        var trackBorder = new Pen(Theme.Brush("TlBorder"), 1);
+        var gridPen = new Pen(Theme.Brush("TlLine"), 1);
+        var dayPen = new Pen(Theme.Brush("Border2"), 1);
+        var accent = Theme.Brush("Accent");
+        var selFill = Theme.Brush("SelFill");
+        var selPen = new Pen(Theme.Brush("Sel"), 1.5);
+        var playhead = Theme.Brush("Playhead");
+        var playheadHalo = new Pen(Theme.Brush("PlayheadHalo"), 1);
+        var faint = Theme.Brush("Faint");
 
-        var trackRect = new Rect(0, 0, width, TrackHeight);
-        dc.DrawRoundedRectangle(TrackFill, TrackBorder, Inset(trackRect, 0.5), 7, 7);
+        var trackRect = new Rect(0, trackTop, width, TrackHeight);
+        dc.DrawRoundedRectangle(trackFill, trackBorder, Inset(trackRect, 0.5), 7, 7);
 
-        // Ticks: pick the smallest step giving >= 90px label spacing; midnights always shown.
-        var step = TickSteps.FirstOrDefault(s => s / spp >= 90, 86400);
-        var labelY = TrackHeight + LabelGap;
+        dc.PushClip(new RectangleGeometry(trackRect));
+
+        // Gridlines + collect tick label positions.
+        var step = TickStep(span);
+        var labels = new List<(double X, string Text, bool Day)>();
         var firstTick = Math.Floor(leftSeconds / step) * step;
         for (var t = firstTick; t <= rightSeconds + step; t += step)
         {
             var x = Math.Round((t - leftSeconds) / spp) + 0.5;
-            if (x < -50 || x > width + 50)
+            if (x < -60 || x > width + 60)
             {
                 continue;
             }
 
             var time = TimeAxis.ToDateTime(t);
             var isMidnight = time.TimeOfDay == TimeSpan.Zero;
-            dc.DrawLine(isMidnight ? DayGridPen : GridPen, new Point(x, 1), new Point(x, TrackHeight - 1));
-
-            var label = isMidnight ? time.ToString("MMM d") : time.ToString("HH:mm");
-            var text = new FormattedText(label, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-                isMidnight ? MonoBoldFace : MonoFace, 10, isMidnight ? DayLabelBrush : LabelBrush,
-                VisualTreeHelper.GetDpi(this).PixelsPerDip);
-            dc.DrawText(text, new Point(x - text.Width / 2, labelY));
+            dc.DrawLine(isMidnight ? dayPen : gridPen, new Point(x, trackTop + 1), new Point(x, trackTop + TrackHeight - 1));
+            labels.Add((x, isMidnight ? time.ToString("MMM d") : time.ToString(span <= 900 ? "HH:mm:ss" : "HH:mm"), isMidnight));
         }
 
-        // Recording segments.
+        // Segments with inline labels when wide enough.
         foreach (var segment in EnumerateSegments())
         {
             if (segment.EndSeconds < leftSeconds || segment.StartSeconds > rightSeconds)
@@ -233,9 +242,23 @@ public sealed class TimelineControl : FrameworkElement
 
             var x1 = (segment.StartSeconds - leftSeconds) / spp;
             var x2 = (segment.EndSeconds - leftSeconds) / spp;
-            var rect = new Rect(x1, 8, Math.Max(2, x2 - x1), 30);
-            dc.DrawRoundedRectangle(SegmentFill, null, rect, 3, 3);
-            dc.DrawRoundedRectangle(null, SegmentInset, Inset(rect, 0.5), 3, 3);
+            var rect = new Rect(x1, trackTop + 8, Math.Max(2, x2 - x1), 34);
+            dc.DrawRoundedRectangle(accent, null, rect, 4, 4);
+
+            if (rect.Width >= 90)
+            {
+                var start = TimeAxis.ToDateTime(segment.StartSeconds);
+                var dur = TimeSpan.FromSeconds(segment.EndSeconds - segment.StartSeconds);
+                var durText = dur.TotalHours >= 1 ? $"{(int)dur.TotalHours}h {dur.Minutes}m" : $"{Math.Max(1, (int)dur.TotalMinutes)}m";
+                var text = new FormattedText($"{start:HH:mm} · {durText}", CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight, MonoFace, 11, Brushes.White, dpi)
+                {
+                    MaxTextWidth = Math.Max(0, rect.Width - 16),
+                    MaxLineCount = 1,
+                    Trimming = TextTrimming.CharacterEllipsis,
+                };
+                dc.DrawText(text, new Point(Math.Max(rect.X + 8, 8), trackTop + 8 + 17 - text.Height / 2));
+            }
         }
 
         // Export selection band.
@@ -244,17 +267,56 @@ public sealed class TimelineControl : FrameworkElement
         {
             var x1 = (inSec - leftSeconds) / spp;
             var x2 = (outSec - leftSeconds) / spp;
-            dc.DrawRoundedRectangle(SelectionFill, SelectionBorder,
-                new Rect(x1, 4, Math.Max(2, x2 - x1), TrackHeight - 8), 4, 4);
+            dc.DrawRoundedRectangle(selFill, selPen,
+                new Rect(x1, trackTop + 4, Math.Max(2, x2 - x1), TrackHeight - 8), 4, 4);
         }
 
-        // Fixed center playhead.
-        var px = width / 2;
-        dc.DrawRectangle(PlayheadFill, null, new Rect(px - 1, -2, 2, TrackHeight + 4));
-        dc.DrawLine(PlayheadHalo, new Point(px - 1.5, -2), new Point(px - 1.5, TrackHeight + 2));
-        dc.DrawLine(PlayheadHalo, new Point(px + 1.5, -2), new Point(px + 1.5, TrackHeight + 2));
-
         dc.Pop();
+
+        // Tick labels below the track.
+        var labelY = trackTop + TrackHeight + LabelGap;
+        foreach (var (x, textStr, isDay) in labels)
+        {
+            var text = new FormattedText(textStr, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+                MonoFace, 10, isDay ? Theme.Brush("Muted2") : faint, dpi);
+            dc.DrawText(text, new Point(Math.Clamp(x - text.Width / 2, 0, Math.Max(0, width - text.Width)), labelY));
+        }
+
+        // Stationary center cursor with accent triangle handles (drawn over everything).
+        var px = width / 2;
+        dc.DrawLine(playheadHalo, new Point(px - 1.5, trackTop - 4), new Point(px - 1.5, trackTop + TrackHeight + 4));
+        dc.DrawLine(playheadHalo, new Point(px + 1.5, trackTop - 4), new Point(px + 1.5, trackTop + TrackHeight + 4));
+        dc.DrawRectangle(playhead, null, new Rect(px - 1, trackTop - 4, 2, TrackHeight + 8));
+
+        var top = trackTop - 4;
+        dc.DrawGeometry(accent, null, Triangle(new Point(px - 6, top - 9), new Point(px + 6, top - 9), new Point(px, top)));
+        var bottom = trackTop + TrackHeight + 4;
+        dc.DrawGeometry(accent, null, Triangle(new Point(px - 6, bottom + 9), new Point(px + 6, bottom + 9), new Point(px, bottom)));
+    }
+
+    private static double TickStep(double span) => span switch
+    {
+        <= 300 => 30,
+        <= 900 => 120,
+        <= 1800 => 300,
+        <= 3600 => 600,
+        <= 10800 => 1800,
+        <= 21600 => 3600,
+        _ => 3 * 3600,
+    };
+
+    private static StreamGeometry Triangle(Point a, Point b, Point c)
+    {
+        var g = new StreamGeometry();
+        using (var ctx = g.Open())
+        {
+            ctx.BeginFigure(a, true, true);
+            ctx.LineTo(b, true, false);
+            ctx.LineTo(c, true, false);
+        }
+
+        g.Freeze();
+        return g;
     }
 
     private IEnumerable<TimelineSegment> EnumerateSegments()
@@ -275,18 +337,4 @@ public sealed class TimelineControl : FrameworkElement
 
     private static Rect Inset(Rect r, double by) =>
         new(r.X + by, r.Y + by, Math.Max(0, r.Width - 2 * by), Math.Max(0, r.Height - 2 * by));
-
-    private static Brush Frozen(string hex)
-    {
-        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
-        brush.Freeze();
-        return brush;
-    }
-
-    private static Pen FrozenPen(string hex, double thickness)
-    {
-        var pen = new Pen(Frozen(hex), thickness);
-        pen.Freeze();
-        return pen;
-    }
 }

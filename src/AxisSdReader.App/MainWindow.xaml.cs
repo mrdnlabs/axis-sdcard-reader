@@ -17,6 +17,7 @@ public partial class MainWindow : Window
 
         Timeline.Scrubbing += seconds => _viewModel.Player.ScrubPreview(seconds);
         Timeline.ScrubCommitted += seconds => _viewModel.Player.ScrubCommit(seconds);
+        Overview.JumpRequested += seconds => _viewModel.Player.ScrubCommit(seconds);
         SourceInitialized += OnSourceInitialized;
         Closed += (_, _) => _viewModel.Dispose();
 

@@ -54,6 +54,9 @@ public sealed class Recording
     /// <summary>Trigger that started the recording (e.g. "continuous"), when recorded by the camera.</summary>
     public string? Trigger => Info?.TriggerType ?? Info?.TriggerName;
 
+    /// <summary>VAPIX source (lens) this recording came from; multi-sensor cameras use 1..N.</summary>
+    public string SourceToken => Info?.SourceToken is { Length: > 0 } s ? s : "1";
+
     /// <summary>True when the last chunk was still being written when the card was removed.</summary>
     public bool WasInterrupted =>
         Chunks.Count > 0 &&
@@ -169,10 +172,13 @@ public static class AxisCardIndexer
     /// Indexes the card from directory/file names plus one small recording.xml read per
     /// recording. Call <see cref="Recording.LoadChunkMetadata"/> per recording for durations.
     /// </summary>
-    public static AxisCard Index(DiscFileSystem fileSystem)
+    /// <param name="fileSystem">The card's filesystem.</param>
+    /// <param name="progress">Invoked with the running recording count as discovery proceeds.</param>
+    public static AxisCard Index(DiscFileSystem fileSystem, Action<int>? progress = null)
     {
         var recordings = new List<Recording>();
         var unrecognized = new List<string>();
+        void Report() => progress?.Invoke(recordings.Count);
 
         foreach (var directory in fileSystem.GetDirectories(@"\"))
         {
@@ -185,6 +191,7 @@ public static class AxisCardIndexer
             if (RecordingId.TryParse(name) is { } flatId)
             {
                 recordings.Add(BuildRecording(fileSystem, flatId, directory));
+                Report();
             }
             else if (DateDir.IsMatch(name))
             {
@@ -200,6 +207,7 @@ public static class AxisCardIndexer
                         if (RecordingId.TryParse(DirName(recordingDir)) is { } id)
                         {
                             recordings.Add(BuildRecording(fileSystem, id, recordingDir));
+                            Report();
                         }
                     }
                 }

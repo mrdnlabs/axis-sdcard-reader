@@ -42,7 +42,19 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
     [NotifyPropertyChangedFor(nameof(BurnedStamp))]
     [NotifyPropertyChangedFor(nameof(PositionDateShort))]
     [NotifyPropertyChangedFor(nameof(PositionDateLong))]
+    [NotifyPropertyChangedFor(nameof(WindowLabel))]
     private double _currentSeconds;
+
+    /// <summary>Detail-track zoom: seconds across the visible window (one of <see cref="Controls.TimelineControl.Spans"/>).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WindowLabel))]
+    [NotifyPropertyChangedFor(nameof(SpanLabel))]
+    [NotifyPropertyChangedFor(nameof(IsFullDay))]
+    private double _spanSeconds = 1800;
+
+    /// <summary>Lens indicator for multi-lens cameras (e.g. "Lens 2"); empty for single-lens.</summary>
+    [ObservableProperty]
+    private string _lensLabel = "";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StatusLabel))]
@@ -129,6 +141,51 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
 
             return "No range set";
         }
+    }
+
+    public bool IsFullDay => SpanSeconds >= 86400;
+
+    /// <summary>Zoom-window readout, e.g. "08:32 – 09:02 · 30 min window" or "Full-day view · 00:00 – 24:00".</summary>
+    public string WindowLabel
+    {
+        get
+        {
+            if (IsFullDay)
+            {
+                return "Full-day view · 00:00 – 24:00";
+            }
+
+            var from = TimeAxis.ToDateTime(CurrentSeconds - SpanSeconds / 2);
+            var to = TimeAxis.ToDateTime(CurrentSeconds + SpanSeconds / 2);
+            return $"{from:HH:mm} – {to:HH:mm} · {SpanLabel} window";
+        }
+    }
+
+    public string SpanLabel => SpanSeconds switch
+    {
+        <= 300 => "5 min",
+        <= 900 => "15 min",
+        <= 1800 => "30 min",
+        <= 3600 => "1 hour",
+        <= 10800 => "3 hours",
+        <= 21600 => "6 hours",
+        _ => "Full day",
+    };
+
+    [RelayCommand]
+    private void ZoomIn() => StepSpan(-1);
+
+    [RelayCommand]
+    private void ZoomOut() => StepSpan(+1);
+
+    [RelayCommand]
+    private void FitDay() => SpanSeconds = 86400;
+
+    private void StepSpan(int direction)
+    {
+        var spans = Controls.TimelineControl.Spans;
+        var index = Math.Clamp(Controls.TimelineControl.NearestSpanIndex(SpanSeconds) + direction, 0, spans.Length - 1);
+        SpanSeconds = spans[index];
     }
 
     public ObservableCollection<TimelineSegment> TimelineSegments { get; } = [];

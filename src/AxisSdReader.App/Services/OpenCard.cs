@@ -90,10 +90,10 @@ public sealed class OpenCard : IDisposable
         }
     }
 
-    public async Task<AxisCard> IndexAsync()
+    public async Task<AxisCard> IndexAsync(Action<int>? progress = null)
     {
         var fs = FileSystem ?? throw new InvalidOperationException("No filesystem is open.");
-        Index = await RunExclusive(() => AxisCardIndexer.Index(fs));
+        Index = await RunExclusive(() => AxisCardIndexer.Index(fs, progress));
         return Index;
     }
 

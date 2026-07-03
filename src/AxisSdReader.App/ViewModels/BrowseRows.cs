@@ -24,22 +24,64 @@ public sealed class DateNode
     public int ClipCount => Recordings.Count;
 }
 
-/// <summary>One camera on the card, with its recordings grouped by local date.</summary>
+/// <summary>One lens (recording source) of a camera. Multi-sensor Axis cameras record each
+/// lens as a separate VAPIX source; single-sensor cameras have exactly one.</summary>
+public sealed class LensNode
+{
+    public LensNode(int number, string sourceToken, IReadOnlyList<DateNode> dates)
+    {
+        Number = number;
+        SourceToken = sourceToken;
+        Dates = dates;
+    }
+
+    public int Number { get; }
+    public string SourceToken { get; }
+    public string Label => $"Lens {Number}";
+    public IReadOnlyList<DateNode> Dates { get; }
+    public IEnumerable<Recording> Recordings => Dates.SelectMany(d => d.Recordings);
+    public int ClipCount => Dates.Sum(d => d.ClipCount);
+}
+
+/// <summary>One camera on the card: its lenses (recording sources), each with recordings
+/// grouped by local date. The browse tree shows the active lens's dates.</summary>
 public sealed class CameraNode
 {
-    public CameraNode(string serial, string name, string model, IReadOnlyList<DateNode> dates)
+    public CameraNode(string serial, string name, string model, IReadOnlyList<LensNode> lenses)
     {
         Serial = serial;
         Name = name;
         Model = model;
-        Dates = dates;
+        Lenses = lenses;
     }
 
     public string Serial { get; }
     public string Name { get; }
     public string Model { get; set; }
-    public IReadOnlyList<DateNode> Dates { get; }
-    public int TotalClips => Dates.Sum(d => d.ClipCount);
+    public IReadOnlyList<LensNode> Lenses { get; }
+    public int ActiveLensIndex { get; set; }
+    public LensNode ActiveLens => Lenses[Math.Clamp(ActiveLensIndex, 0, Lenses.Count - 1)];
+    public bool IsMultiLens => Lenses.Count > 1;
+    public IReadOnlyList<DateNode> Dates => ActiveLens.Dates;
+    public int TotalClips => Lenses.Sum(l => l.ClipCount);
+}
+
+/// <summary>A lens tab in the lens bar.</summary>
+public sealed partial class LensTab : ObservableObject
+{
+    public LensTab(LensNode node, ICommand command)
+    {
+        Node = node;
+        Command = command;
+    }
+
+    public LensNode Node { get; }
+    public ICommand Command { get; }
+    public string Number => Node.Number.ToString();
+    public string Label => Node.Label;
+
+    [ObservableProperty]
+    private bool _isActive;
 }
 
 /// <summary>Base for the flattened browse-tree rows bound to the sidebar ItemsControl.</summary>
@@ -65,6 +107,8 @@ public sealed partial class CameraRow : BrowseRow
     public string Name => Node.Name;
     public string Model => Node.Model;
     public string Badge => Node.TotalClips.ToString();
+    public bool IsMultiLens => Node.IsMultiLens;
+    public string LensTag => $"{Node.Lenses.Count} lenses";
 }
 
 public sealed partial class DateRow : BrowseRow

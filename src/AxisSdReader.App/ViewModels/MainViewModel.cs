@@ -78,6 +78,60 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly HashSet<string> _expandedCameras = [];
     private readonly HashSet<string> _expandedDates = [];
 
+    // --- lens bar --------------------------------------------------------------
+
+    public ObservableCollection<LensTab> LensTabs { get; } = [];
+
+    [ObservableProperty]
+    private bool _showLensBar;
+
+    [ObservableProperty]
+    private string _lensHint = "";
+
+    // --- boot / splash overlay --------------------------------------------------
+
+    [ObservableProperty]
+    private bool _bootVisible;
+
+    [ObservableProperty]
+    private string _bootStageLabel = "Detecting SD card…";
+
+    [ObservableProperty]
+    private string _bootDetail = "";
+
+    [ObservableProperty]
+    private double _bootFraction; // 0..1 progress-bar fill
+
+    [ObservableProperty]
+    private bool _bootDone;
+
+    [ObservableProperty]
+    private string _bootFooter = "click anywhere to skip";
+
+    private bool _bootSkipped;
+
+    // --- theme --------------------------------------------------------------------
+
+    [ObservableProperty]
+    private bool _isDarkTheme = true;
+
+    [ObservableProperty]
+    private string _accentName = "Trust Blue";
+
+    [RelayCommand]
+    private void ToggleTheme()
+    {
+        IsDarkTheme = !IsDarkTheme;
+        Theme.Apply(IsDarkTheme, AccentName);
+    }
+
+    [RelayCommand]
+    private void SetAccent(string name)
+    {
+        AccentName = name;
+        Theme.Apply(IsDarkTheme, name);
+    }
+
     // --- export dialog -------------------------------------------------------
 
     [ObservableProperty]
@@ -137,6 +191,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         IsBusy = true;
         BusyText = "Scanning for Axis cards…";
         WaitingMessage = "Scanning for Axis camera cards…";
+        _bootSkipped = false;
+        SetBootStage("Detecting SD card…", 0.08, "scanning USB readers");
         try
         {
             var card = await Task.Run(() => DiskEnumerator.GetPhysicalDisks()
@@ -147,8 +203,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (card.Disk is null)
             {
                 WaitingMessage = "No Axis camera card detected.\nInsert a card, or open a card image.";
+                BootVisible = false;
                 return;
             }
+
+            SetBootStage("Detecting SD card…", 0.15, $"{card.Disk.FriendlyName} · ext4");
 
             await OpenCardAsync(
                 () => OpenCard.FromDevice(card.Disk.DiskNumber, card.Disk.FriendlyName, card.Disk.SizeBytes),
@@ -183,6 +242,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         CloseCardInternal();
         IsBusy = true;
         BusyText = busyText;
+        SetBootStage("Verifying read-only mount…", 0.25, "locking volume");
 
         try
         {
@@ -197,12 +257,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 };
                 card.Dispose();
                 WaitingMessage = message;
+                BootVisible = false;
                 return;
             }
 
             _card = card;
             BusyText = "Indexing recordings…";
-            var index = await card.IndexAsync();
+            SetBootStage("Indexing recordings…", 0.45, "0 recordings found");
+            BootFooter = $"{card.Description} — click anywhere to skip";
+
+            var indexProgress = new Progress<int>(count =>
+            {
+                BootDetail = $"{count} recording{(count == 1 ? "" : "s")} found";
+                BootFraction = Math.Min(0.92, 0.45 + count * 0.01);
+            });
+            var index = await card.IndexAsync(count => ((IProgress<int>)indexProgress).Report(count));
 
             _cameras = BuildBrowseModel(index);
             ApplyCardIdentity(card, index);
@@ -228,10 +297,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 await LoadCameraIntoPlayer(_cameras[0]);
             }
+
+            // Boot complete: brief "Ready to review" beat, then reveal the app.
+            SetBootStage("Ready to review", 1.0, RecCountLabel);
+            BootDone = true;
+            if (!_bootSkipped)
+            {
+                await Task.Delay(650);
+            }
+
+            BootVisible = false;
         }
         catch (Exception ex)
         {
             WaitingMessage = ex.Message;
+            BootVisible = false;
         }
         finally
         {
@@ -240,19 +320,77 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void SetBootStage(string stage, double fraction, string detail)
+    {
+        if (_bootSkipped)
+        {
+            return;
+        }
+
+        BootVisible = true;
+        BootDone = false;
+        BootStageLabel = stage;
+        BootFraction = fraction;
+        BootDetail = detail;
+    }
+
+    [RelayCommand]
+    private void SkipBoot()
+    {
+        _bootSkipped = true;
+        BootVisible = false;
+    }
+
+    /// <summary>Replays the intro (title-bar logo click) using the already-open card's data.</summary>
+    [RelayCommand]
+    private async Task ReplayIntro()
+    {
+        if (!IsCardOpen || BootVisible)
+        {
+            return;
+        }
+
+        _bootSkipped = false;
+        BootDone = false;
+        foreach (var (stage, fraction, delay) in new[]
+                 {
+                     ("Detecting SD card…", 0.15, 350),
+                     ("Verifying read-only mount…", 0.40, 350),
+                     ("Indexing recordings…", 0.80, 420),
+                 })
+        {
+            SetBootStage(stage, fraction, RecCountLabel);
+            await Task.Delay(delay);
+            if (_bootSkipped)
+            {
+                return;
+            }
+        }
+
+        SetBootStage("Ready to review", 1.0, RecCountLabel);
+        BootDone = true;
+        await Task.Delay(600);
+        BootVisible = false;
+    }
+
     private static IReadOnlyList<CameraNode> BuildBrowseModel(AxisCard index)
     {
         var cameras = new List<CameraNode>();
         foreach (var camera in index.Cameras)
         {
-            var dates = camera.Recordings
-                .GroupBy(r => LocalDate(r))
-                .OrderByDescending(g => g.Key)
-                .Select(g => new DateNode(g.Key, g.OrderBy(r => r.StartTime).ToList()))
+            // Multi-sensor cameras record each lens as a separate VAPIX source.
+            var lenses = camera.Recordings
+                .GroupBy(r => r.SourceToken)
+                .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                .Select((g, i) => new LensNode(i + 1, g.Key, g
+                    .GroupBy(LocalDate)
+                    .OrderByDescending(d => d.Key)
+                    .Select(d => new DateNode(d.Key, d.OrderBy(r => r.StartTime).ToList()))
+                    .ToList()))
                 .ToList();
 
             var name = $"Camera {camera.Serial[^Math.Min(4, camera.Serial.Length)..]}";
-            cameras.Add(new CameraNode(camera.Serial, name, FormatMac(camera.Serial), dates));
+            cameras.Add(new CameraNode(camera.Serial, name, FormatMac(camera.Serial), lenses));
         }
 
         return cameras;
@@ -417,18 +555,57 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         await Player.SeekToRecording(row.Recording);
     }
 
-    /// <summary>Loads all of a camera's recordings into the player (no-op if already loaded).</summary>
-    private async Task LoadCameraIntoPlayer(CameraNode camera)
+    /// <summary>Loads the camera's active lens into the player (no-op if already loaded).</summary>
+    private async Task LoadCameraIntoPlayer(CameraNode camera, bool force = false)
     {
-        if (_card is null || _loadedCameraSerial == camera.Serial)
+        if (_card is null || (!force && _loadedCameraSerial == camera.Serial))
         {
             return;
         }
 
         Player.ClearSelection();
-        var recordings = camera.Dates.SelectMany(d => d.Recordings).OrderBy(r => r.StartTime).ToList();
+        Player.LensLabel = camera.IsMultiLens ? camera.ActiveLens.Label : "";
+        var recordings = camera.ActiveLens.Recordings.OrderBy(r => r.StartTime).ToList();
         await Player.LoadCamera(_card, camera.Name, camera.Model, recordings);
         _loadedCameraSerial = camera.Serial;
+        RebuildLensBar(camera);
+    }
+
+    private void RebuildLensBar(CameraNode camera)
+    {
+        LensTabs.Clear();
+        ShowLensBar = camera.IsMultiLens;
+        if (!camera.IsMultiLens)
+        {
+            LensHint = "";
+            return;
+        }
+
+        foreach (var lens in camera.Lenses)
+        {
+            LensTabs.Add(new LensTab(lens, SelectLensCommand) { IsActive = lens == camera.ActiveLens });
+        }
+
+        LensHint = $"{camera.Lenses.Count} lenses recorded by this camera · viewed one at a time";
+    }
+
+    [RelayCommand]
+    private async Task SelectLens(LensTab tab)
+    {
+        var camera = _cameras.FirstOrDefault(c => c.Serial == _selectedCameraSerial);
+        if (_card is null || camera is null || camera.ActiveLens == tab.Node)
+        {
+            return;
+        }
+
+        // Switch viewpoint but keep the moment: same timestamp, same play/pause state.
+        var position = Player.CurrentSeconds;
+        var wasPlaying = Player.IsPlaying;
+
+        camera.ActiveLensIndex = camera.Lenses.ToList().IndexOf(tab.Node);
+        RebuildRows();
+        await LoadCameraIntoPlayer(camera, force: true);
+        await Player.SeekToSeconds(position, autoPlay: wasPlaying);
     }
 
     private void OnActiveRecordingChanged(Recording? recording)

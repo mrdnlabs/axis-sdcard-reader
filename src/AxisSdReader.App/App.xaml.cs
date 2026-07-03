@@ -9,6 +9,8 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        Theme.Apply(dark: true, accent: "Trust Blue");
+
         // Locates the libvlc native libraries shipped by VideoLAN.LibVLC.Windows.
         LibVLCSharp.Shared.Core.Initialize();
 
