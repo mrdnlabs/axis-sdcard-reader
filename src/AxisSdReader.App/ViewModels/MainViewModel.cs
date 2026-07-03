@@ -12,7 +12,7 @@ using Microsoft.Win32;
 namespace AxisSdReader.App.ViewModels;
 
 /// <summary>A physical disk shown in the device list.</summary>
-public sealed record DeviceItem(int DiskNumber, string DisplayName, bool IsUsb)
+public sealed record DeviceItem(int DiskNumber, string DisplayName, bool IsUsb, bool IsAxisCard)
 {
     public override string ToString() => DisplayName;
 }
@@ -102,38 +102,64 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _ = RefreshDevices();
     }
 
+    [ObservableProperty]
+    private bool _showAllDrives;
+
+    [ObservableProperty]
+    private string _deviceScanStatus = "";
+
+    private IReadOnlyList<DeviceItem> _allDevices = [];
+
     [RelayCommand]
     private async Task RefreshDevices()
     {
-        // Enumeration issues IOCTLs per disk/volume; empty card-reader slots can take a
-        // moment to answer, so keep it off the UI thread.
-        var disks = await Task.Run(DiskEnumerator.GetPhysicalDisks);
+        DeviceScanStatus = "Scanning for cards…";
 
+        // Enumeration and probing issue IOCTLs and raw reads; keep them off the UI thread.
+        // Only USB disks with media are probed for Axis content — system disks are never touched.
+        var probed = await Task.Run(() =>
+            DiskEnumerator.GetPhysicalDisks()
+                .Select(disk => (Disk: disk,
+                    Probe: disk.IsUsb && disk.SizeBytes > 0 ? AxisCardDetector.Probe(disk.DiskNumber) : null))
+                .ToList());
+
+        var items = new List<DeviceItem>();
+        foreach (var (disk, probe) in probed)
+        {
+            var size = disk.SizeBytes is { } s ? $"{s / (1024.0 * 1024 * 1024):F1} GB" : "empty";
+            var isAxis = probe?.IsLikelyAxisCard == true;
+            var display = isAxis
+                ? $"Axis camera card  ({size}, disk #{disk.DiskNumber})"
+                : $"#{disk.DiskNumber}  {disk.FriendlyName}  ({size}{(disk.IsUsb ? ", USB" : "")})";
+            items.Add(new DeviceItem(disk.DiskNumber, display, disk.IsUsb, isAxis));
+        }
+
+        _allDevices = items;
+        RebuildDeviceList();
+    }
+
+    partial void OnShowAllDrivesChanged(bool value) => RebuildDeviceList();
+
+    private void RebuildDeviceList()
+    {
         var previous = SelectedDevice?.DiskNumber;
         Devices.Clear();
 
-        var usbWithMedia = new List<DeviceItem>();
-        foreach (var disk in disks)
+        foreach (var device in _allDevices.Where(d => ShowAllDrives || d.IsAxisCard))
         {
-            var size = disk.SizeBytes is { } s ? $"{s / (1024.0 * 1024 * 1024):F1} GB" : "empty";
-            var item = new DeviceItem(
-                disk.DiskNumber,
-                $"#{disk.DiskNumber}  {disk.FriendlyName}  ({size}{(disk.IsUsb ? ", USB" : "")})",
-                disk.IsUsb);
-            Devices.Add(item);
-
-            // Multi-slot readers expose a disk per slot; empty slots report no size.
-            if (disk.IsUsb && disk.SizeBytes > 0)
-            {
-                usbWithMedia.Add(item);
-            }
+            Devices.Add(device);
         }
 
-        // Prefer re-selecting the same disk, else a USB device with media, else any USB device.
         SelectedDevice = Devices.FirstOrDefault(d => d.DiskNumber == previous)
-            ?? usbWithMedia.FirstOrDefault()
+            ?? Devices.FirstOrDefault(d => d.IsAxisCard)
             ?? Devices.FirstOrDefault(d => d.IsUsb)
             ?? Devices.FirstOrDefault();
+
+        DeviceScanStatus = Devices.Count > 0
+            ? ""
+            : ShowAllDrives
+                ? "No drives found."
+                : "No Axis camera card detected — insert a card, or tick 'Show all drives'.";
     }
 
     [RelayCommand]
