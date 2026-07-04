@@ -26,6 +26,14 @@ public sealed class SdCardSession : IDisposable
 
     public IReadOnlyList<string> ProtectionLog => _guard?.Log ?? [];
 
+    /// <summary>
+    /// True when every volume on the card was locked (or there were none) — i.e. the card is genuinely
+    /// protected against Windows re-mounting/formatting it. False means at least one volume could not be
+    /// locked and callers must not present the card as read-only-safe. Always true when volume guarding
+    /// was disabled (diagnostics) since no protection was attempted or promised.
+    /// </summary>
+    public bool FullyProtected => _guard is null || _guard.AllVolumesLocked;
+
     /// <summary>Opens a protected session on the given physical disk.</summary>
     /// <param name="diskNumber">The physical disk number (see <see cref="DiskEnumerator"/>).</param>
     /// <param name="guardVolumes">Lock/dismount volumes and remove drive letters first. Disable only for diagnostics.</param>

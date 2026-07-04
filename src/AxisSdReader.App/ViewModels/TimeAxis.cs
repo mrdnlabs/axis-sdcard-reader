@@ -5,22 +5,27 @@ using AxisSdReader.Core.Axis;
 namespace AxisSdReader.App.ViewModels;
 
 /// <summary>
-/// The app's continuous time axis: seconds (double) since a fixed local-time epoch.
-/// All timeline math — segments, playhead, scrubbing, selection — runs on this axis,
-/// so midnight is just another value and recordings can span days.
+/// The app's continuous time axis: seconds (double) since a fixed <em>UTC</em> epoch.
+/// All timeline math — segments, playhead, scrubbing, selection — runs on this axis. Using UTC
+/// keeps the axis strictly monotonic, so footage that spans a daylight-saving change still orders,
+/// seeks and slices correctly; conversion to the user's local time happens only in
+/// <see cref="ToDateTime"/> (and the display helpers built on it), so a value is still shown as the
+/// local wall-clock time. Midnight is just another value and recordings can span days.
 /// </summary>
 public static class TimeAxis
 {
     // Arbitrary fixed origin, comfortably before any camera footage.
-    private static readonly DateTime Epoch = new(2000, 1, 1, 0, 0, 0, DateTimeKind.Local);
+    private static readonly DateTime Epoch = new(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     public static double ToSeconds(DateTime time)
     {
-        var local = time.Kind == DateTimeKind.Utc ? time.ToLocalTime() : time;
-        return (local - Epoch).TotalSeconds;
+        // Treat non-UTC values (Unspecified folder-name times, or Local) as local and normalise to UTC.
+        var utc = time.Kind == DateTimeKind.Utc ? time : time.ToUniversalTime();
+        return (utc - Epoch).TotalSeconds;
     }
 
-    public static DateTime ToDateTime(double seconds) => Epoch.AddSeconds(seconds);
+    /// <summary>The local wall-clock time for an axis position (inverse of <see cref="ToSeconds"/> for display).</summary>
+    public static DateTime ToDateTime(double seconds) => Epoch.AddSeconds(seconds).ToLocalTime();
 
     public static string ClockText(double seconds) => ToDateTime(seconds).ToString("HH:mm:ss");
 

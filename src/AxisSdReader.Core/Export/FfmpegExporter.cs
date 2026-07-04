@@ -97,6 +97,10 @@ public static class FfmpegExporter
         var tempDir = Path.Combine(Path.GetTempPath(), "axis-export-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
 
+        // Only clean up the output on failure if this call is what created it (don't delete a
+        // pre-existing user file if something goes wrong).
+        var outputPreExisted = File.Exists(outputPath);
+
         try
         {
             // 1) Copy the needed chunks off the read-only card to temp files FFmpeg can seek.
@@ -135,7 +139,11 @@ public static class FfmpegExporter
         }
         catch
         {
-            TryDelete(outputPath);
+            if (!outputPreExisted)
+            {
+                TryDelete(outputPath);
+            }
+
             throw;
         }
         finally
@@ -188,6 +196,9 @@ public static class FfmpegExporter
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
+            // Don't inherit the elevated app's current directory (a possibly-writable DLL-search path).
+            // Run in ffmpeg's own directory, where its expected DLLs live.
+            WorkingDirectory = Path.GetDirectoryName(ffmpeg) ?? Path.GetTempPath(),
         };
 
         using var process = new Process { StartInfo = psi };

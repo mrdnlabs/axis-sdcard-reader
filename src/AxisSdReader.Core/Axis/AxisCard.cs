@@ -121,8 +121,11 @@ public sealed class Recording
 
                     return chunk with { Block = block, Metadata = metadata };
                 }
-                catch (Exception ex) when (ex is IOException or EndOfStreamException or InvalidOperationException)
+                catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
                 {
+                    // Best-effort: any failure reading one chunk (DiscUtils filesystem errors, malformed
+                    // MKV/XML, overflow on crafted sizes) degrades that chunk to no metadata rather than
+                    // aborting the whole recording's load.
                     return chunk;
                 }
             })

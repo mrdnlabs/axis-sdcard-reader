@@ -31,6 +31,9 @@ public static class MkvMetadataReader
     private const uint BlockGroup = 0xA0;
     private const uint BlockElement = 0xA1;
 
+    // Sentinel returned for legal but unhandled 5–8 byte element IDs; matches no real ID above.
+    private const uint UnknownLargeId = 0xFFFFFFFF;
+
     private static readonly DateTime MatroskaEpoch = new(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     /// <summary>
@@ -109,6 +112,11 @@ public static class MkvMetadataReader
                         {
                             case TimestampScale:
                                 timestampScale = (long)(ReadUInt(stream) ?? 1_000_000);
+                                if (timestampScale is <= 0 or > 1_000_000_000)
+                                {
+                                    timestampScale = 1_000_000; // reject absurd/negative scales from corrupt headers
+                                }
+
                                 break;
                             case Duration:
                                 durationTicks = ReadFloat(stream);
@@ -199,7 +207,9 @@ public static class MkvMetadataReader
             truncated = true;
         }
 
-        TimeSpan? duration = durationTicks is { } d and > 0 && !double.IsNaN(d)
+        // Reject NaN and ±Infinity (a crafted 8-byte float Duration) as well as non-positive
+        // values; a non-finite duration would otherwise produce a garbage/huge TimeSpan.
+        TimeSpan? duration = durationTicks is { } d && double.IsFinite(d) && d > 0
             ? TimeSpan.FromTicks((long)(d * timestampScale / 100.0))
             : null;
 
@@ -250,44 +260,24 @@ public static class MkvMetadataReader
                         lastClusterTs = (long)(ReadUInt(stream) ?? 0);
                         break;
                     case SimpleBlock:
-                    {
-                        var end = ElementEnd(stream);
-                        if (end > stream.Length)
+                        lastBlockRelativeTs = ReadBlockInto(stream, lastBlockRelativeTs, ref truncated);
+                        if (truncated)
                         {
-                            truncated = true;
-                            goto done; // block payload cut off mid-write
+                            goto done;
                         }
 
-                        var rel = ReadBlockRelativeTimestamp(stream);
-                        if (rel > lastBlockRelativeTs)
-                        {
-                            lastBlockRelativeTs = rel;
-                        }
-
-                        stream.Position = end;
                         break;
-                    }
                     case BlockGroup:
                         ReadSize(stream); // enter; the contained Block is handled below
                         break;
                     case BlockElement:
-                    {
-                        var end = ElementEnd(stream);
-                        if (end > stream.Length)
+                        lastBlockRelativeTs = ReadBlockInto(stream, lastBlockRelativeTs, ref truncated);
+                        if (truncated)
                         {
-                            truncated = true;
                             goto done;
                         }
 
-                        var rel = ReadBlockRelativeTimestamp(stream);
-                        if (rel > lastBlockRelativeTs)
-                        {
-                            lastBlockRelativeTs = rel;
-                        }
-
-                        stream.Position = end;
                         break;
-                    }
                     default:
                         if (SkipElement(stream) is null)
                         {
@@ -305,8 +295,53 @@ public static class MkvMetadataReader
         }
 
         done:
-        var totalNs = (lastClusterTs + lastBlockRelativeTs) * timestampScale;
-        return (totalNs > 0 ? TimeSpan.FromTicks(totalNs / 100) : null, truncated);
+        // Guard against overflow from attacker-controlled cluster timestamps / scale.
+        if (lastClusterTs < 0 || lastBlockRelativeTs < 0 || timestampScale <= 0)
+        {
+            return (null, true);
+        }
+
+        try
+        {
+            var totalNs = checked((lastClusterTs + lastBlockRelativeTs) * timestampScale);
+            return (totalNs > 0 ? TimeSpan.FromTicks(totalNs / 100) : null, truncated);
+        }
+        catch (OverflowException)
+        {
+            return (null, true);
+        }
+    }
+
+    /// <summary>
+    /// Reads one (Simple)Block during the cluster scan: advances past the whole element and, when the
+    /// declared payload is large enough to hold a timestamp, folds its relative timestamp into the max.
+    /// Sets <paramref name="truncated"/> and returns the unchanged max when the payload runs past EOF or
+    /// is too small to contain a timestamp header.
+    /// </summary>
+    private static long ReadBlockInto(Stream stream, long lastBlockRelativeTs, ref bool truncated)
+    {
+        var size = ReadSize(stream);
+        var payloadStart = stream.Position;
+        var end = size is { } s ? payloadStart + s : long.MaxValue;
+        if (end > stream.Length)
+        {
+            truncated = true; // block payload cut off mid-write
+            return lastBlockRelativeTs;
+        }
+
+        // A block payload must be at least a 1-byte track VINT + 2-byte timestamp; anything smaller is
+        // malformed. Skip its timestamp rather than reading bytes beyond the element boundary.
+        if (size is { } sz && sz >= 3)
+        {
+            var rel = ReadBlockRelativeTimestamp(stream);
+            if (rel > lastBlockRelativeTs)
+            {
+                lastBlockRelativeTs = rel;
+            }
+        }
+
+        stream.Position = end;
+        return lastBlockRelativeTs;
     }
 
     /// <summary>Reads the signed 16-bit relative timestamp of a (Simple)Block, positioned at its payload start.</summary>
@@ -347,7 +382,7 @@ public static class MkvMetadataReader
         }
 
         var length = LeadingZeroLength((byte)first);
-        if (length is < 1 or > 4)
+        if (length is < 1 or > 8)
         {
             throw new EndOfStreamException("Invalid EBML ID.");
         }
@@ -361,10 +396,16 @@ public static class MkvMetadataReader
                 throw new EndOfStreamException();
             }
 
-            value = (value << 8) | (uint)b;
+            if (i < 4)
+            {
+                value = (value << 8) | (uint)b;
+            }
         }
 
-        return value;
+        // Elements we care about all have 1–4 byte IDs. A legal 5–8 byte ID is consumed above but
+        // reported as a sentinel so the caller skips it (default → SkipElement) instead of aborting
+        // the whole parse as it did when this threw.
+        return length <= 4 ? value : UnknownLargeId;
     }
 
     private static int IdLength(uint id) => id switch

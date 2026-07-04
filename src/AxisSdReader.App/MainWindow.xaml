@@ -447,15 +447,60 @@
                     <TextBlock Text="{Binding CardSubtitle}" FontSize="11.5" Foreground="{DynamicResource T.Text3}" />
                 </StackPanel>
 
-                <!-- Trust indicator -->
-                <Border DockPanel.Dock="Left" Background="{DynamicResource T.TrustBg}" BorderBrush="{DynamicResource T.TrustBorder}"
-                        BorderThickness="1" CornerRadius="8" Padding="11,7,13,7" VerticalAlignment="Center">
+                <!-- Trust indicator: reflects the REAL protection state, not a fixed reassurance. -->
+                <Border DockPanel.Dock="Left" BorderThickness="1" CornerRadius="8" Padding="11,7,13,7" VerticalAlignment="Center">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="{DynamicResource T.TrustBg}" />
+                            <Setter Property="BorderBrush" Value="{DynamicResource T.TrustBorder}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCardProtected}" Value="False">
+                                    <Setter Property="Background" Value="#3A2A12" />
+                                    <Setter Property="BorderBrush" Value="#7A5A2A" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="&#xE72E;" FontFamily="Segoe MDL2 Assets" FontSize="15" Foreground="{DynamicResource T.Trust}"
-                                   VerticalAlignment="Center" Margin="0,0,9,0" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="15" VerticalAlignment="Center" Margin="0,0,9,0">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="&#xE72E;" />
+                                    <Setter Property="Foreground" Value="{DynamicResource T.Trust}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsCardProtected}" Value="False">
+                                            <Setter Property="Text" Value="&#xE7BA;" />
+                                            <Setter Property="Foreground" Value="#F0B429" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
                         <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="Card locked · Read-only" FontSize="12.5" FontWeight="Bold" Foreground="{DynamicResource T.TrustText}" />
-                            <TextBlock Text="Footage cannot be changed or deleted" FontSize="10.5" Foreground="{DynamicResource T.TrustText2}" />
+                            <TextBlock Text="{Binding ProtectionHeadline}" FontSize="12.5" FontWeight="Bold">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{DynamicResource T.TrustText}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsCardProtected}" Value="False">
+                                                <Setter Property="Foreground" Value="#F5C56B" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="{Binding ProtectionDetail}" FontSize="10.5">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{DynamicResource T.TrustText2}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsCardProtected}" Value="False">
+                                                <Setter Property="Foreground" Value="#E0A94F" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </StackPanel>
                     </StackPanel>
                 </Border>

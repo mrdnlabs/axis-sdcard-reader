@@ -70,7 +70,15 @@ public sealed class RawDiskStream : Stream
     public override long Position
     {
         get => _position;
-        set => _position = value;
+        set
+        {
+            if (value < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), "Position cannot be negative.");
+            }
+
+            _position = value;
+        }
     }
 
     public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
@@ -130,13 +138,20 @@ public sealed class RawDiskStream : Stream
 
     public override long Seek(long offset, SeekOrigin origin)
     {
-        _position = origin switch
+        var target = origin switch
         {
             SeekOrigin.Begin => offset,
             SeekOrigin.Current => _position + offset,
             SeekOrigin.End => _length + offset,
             _ => throw new ArgumentOutOfRangeException(nameof(origin)),
         };
+
+        if (target < 0)
+        {
+            throw new IOException("An attempt was made to move the position before the beginning of the stream.");
+        }
+
+        _position = target;
         return _position;
     }
 

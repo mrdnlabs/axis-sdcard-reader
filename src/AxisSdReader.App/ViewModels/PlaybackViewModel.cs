@@ -33,6 +33,13 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
     private Media? _currentMedia;
     private bool _isScrubbing;
     private int _seekVersion;
+    private bool _disposed;
+
+    // Kept so they can be detached in Dispose (LibVLC callbacks otherwise fire after teardown).
+    private EventHandler<MediaPlayerTimeChangedEventArgs>? _onTimeChanged;
+    private EventHandler<EventArgs>? _onEndReached;
+    private EventHandler<EventArgs>? _onPlaying;
+    private EventHandler<EventArgs>? _onPaused;
 
     [ObservableProperty]
     private MediaPlayer? _mediaPlayer;
@@ -206,10 +213,21 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         var libVlc = new LibVLC("--no-osd", "--no-video-title-show");
         var player = new MediaPlayer(libVlc) { EnableHardwareDecoding = true };
 
-        player.TimeChanged += (_, e) => _dispatcher.BeginInvoke(() => OnChunkTimeChanged(e.Time));
-        player.EndReached += (_, _) => _dispatcher.BeginInvoke(OnChunkEnded);
-        player.Playing += (_, _) => _dispatcher.BeginInvoke(() => IsPlaying = true);
-        player.Paused += (_, _) => _dispatcher.BeginInvoke(() => IsPlaying = false);
+        // Marshal to the UI thread and drop the event if we've since been disposed — LibVLC can raise
+        // these from its own thread just after teardown, when MediaPlayer/_libVlc are gone.
+        _onTimeChanged = (_, e) =>
+        {
+            var t = e.Time;
+            _dispatcher.BeginInvoke(() => { if (!_disposed) OnChunkTimeChanged(t); });
+        };
+        _onEndReached = (_, _) => _dispatcher.BeginInvoke(() => { if (!_disposed) OnChunkEnded(); });
+        _onPlaying = (_, _) => _dispatcher.BeginInvoke(() => { if (!_disposed) IsPlaying = true; });
+        _onPaused = (_, _) => _dispatcher.BeginInvoke(() => { if (!_disposed) IsPlaying = false; });
+
+        player.TimeChanged += _onTimeChanged;
+        player.EndReached += _onEndReached;
+        player.Playing += _onPlaying;
+        player.Paused += _onPaused;
 
         _dispatcher.Invoke(() =>
         {
@@ -532,8 +550,16 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
 
         if (!play)
         {
-            // Show the frame but stay paused. A tiny delay lets VLC render the first frame.
-            _dispatcher.BeginInvoke(DispatcherPriority.Background, () => MediaPlayer.SetPause(true));
+            // Show the frame but stay paused. A tiny delay lets VLC render the first frame. Guard against
+            // teardown or a newer chunk having been swapped in before this deferred call runs.
+            var pausedMedia = _currentMedia;
+            _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+            {
+                if (!_disposed && ReferenceEquals(_currentMedia, pausedMedia))
+                {
+                    MediaPlayer?.SetPause(true);
+                }
+            });
         }
 
         if (oldMedia is not null || oldInput is not null || oldStream is not null)
@@ -611,6 +637,13 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         IsPlaying = false;
     }
 
+    /// <summary>
+    /// Stops playback and releases the current card stream so an exclusive card operation (e.g. export)
+    /// can run without the demux thread reading the shared device stream at the same time. The playhead
+    /// position is kept, so pressing play resumes from where the user was.
+    /// </summary>
+    public void SuspendForExclusiveIo() => StopPlayback();
+
     private void DisposeCurrentMedia()
     {
         _currentMedia?.Dispose();
@@ -635,6 +668,18 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
+
+        // Detach the LibVLC callbacks before tearing the player down, so none fire against a disposed
+        // MediaPlayer/LibVLC.
+        if (MediaPlayer is { } mp)
+        {
+            if (_onTimeChanged is not null) mp.TimeChanged -= _onTimeChanged;
+            if (_onEndReached is not null) mp.EndReached -= _onEndReached;
+            if (_onPlaying is not null) mp.Playing -= _onPlaying;
+            if (_onPaused is not null) mp.Paused -= _onPaused;
+        }
+
         StopPlayback();
         MediaPlayer?.Dispose();
         _libVlc?.Dispose();

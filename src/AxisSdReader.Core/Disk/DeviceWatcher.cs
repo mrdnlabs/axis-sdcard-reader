@@ -23,6 +23,9 @@ public sealed class DeviceWatcher : IDisposable
     private readonly WndProcDelegate _wndProc; // kept referenced so the GC cannot collect the callback
     private nint _hwnd;
     private nint _notificationHandle;
+    private nint _hInstance;
+    private string? _className;
+    private volatile bool _listening;
 
     public event Action<string>? DiskArrived;
     public event Action<string>? DiskRemoved;
@@ -36,36 +39,79 @@ public sealed class DeviceWatcher : IDisposable
         ready.Wait(TimeSpan.FromSeconds(5));
     }
 
+    /// <summary>
+    /// True when the watcher successfully registered for device-arrival notifications. When false,
+    /// hot-plug detection is unavailable (the caller can still scan on demand); it is not fatal.
+    /// </summary>
+    public bool IsListening => _listening;
+
     private void MessageLoop(ManualResetEventSlim ready)
     {
-        var className = $"AxisSdReaderDeviceWatcher_{Environment.CurrentManagedThreadId}";
+        _hInstance = GetModuleHandle(null);
+        // A GUID-based class name avoids colliding with a stale class atom if a previous watcher's
+        // managed thread id is recycled before its class was unregistered.
+        var className = $"AxisSdReaderDeviceWatcher_{Guid.NewGuid():N}";
         var wndClass = new WNDCLASS
         {
             lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProc),
             lpszClassName = className,
-            hInstance = GetModuleHandle(null),
+            hInstance = _hInstance,
         };
 
-        RegisterClass(ref wndClass);
-        _hwnd = CreateWindowEx(0, className, string.Empty, 0, 0, 0, 0, 0, HwndMessage, 0, wndClass.hInstance, 0);
-
-        if (_hwnd != 0)
+        if (RegisterClass(ref wndClass) != 0)
         {
-            var filter = new DEV_BROADCAST_DEVICEINTERFACE
+            _className = className;
+            _hwnd = CreateWindowEx(0, className, string.Empty, 0, 0, 0, 0, 0, HwndMessage, 0, _hInstance, 0);
+
+            if (_hwnd != 0)
             {
-                dbcc_size = Marshal.SizeOf<DEV_BROADCAST_DEVICEINTERFACE>(),
-                dbcc_devicetype = DbtDevTypDeviceInterface,
-                dbcc_classguid = DiskInterfaceGuid,
-            };
-            _notificationHandle = RegisterDeviceNotification(_hwnd, ref filter, 0);
+                var filter = new DEV_BROADCAST_DEVICEINTERFACE
+                {
+                    dbcc_size = Marshal.SizeOf<DEV_BROADCAST_DEVICEINTERFACE>(),
+                    dbcc_devicetype = DbtDevTypDeviceInterface,
+                    dbcc_classguid = DiskInterfaceGuid,
+                };
+                _notificationHandle = RegisterDeviceNotification(_hwnd, ref filter, 0);
+                _listening = _notificationHandle != 0;
+            }
         }
 
         ready.Set();
+
+        if (!_listening)
+        {
+            Cleanup(); // nothing to pump — release any partial registration and end the thread
+            return;
+        }
 
         while (GetMessage(out var msg, 0, 0, 0) > 0)
         {
             TranslateMessage(ref msg);
             DispatchMessage(ref msg);
+        }
+
+        Cleanup();
+    }
+
+    /// <summary>Releases the notification, window and window class. Runs on the watcher thread.</summary>
+    private void Cleanup()
+    {
+        if (_notificationHandle != 0)
+        {
+            UnregisterDeviceNotification(_notificationHandle);
+            _notificationHandle = 0;
+        }
+
+        if (_hwnd != 0)
+        {
+            DestroyWindow(_hwnd);
+            _hwnd = 0;
+        }
+
+        if (_className is not null)
+        {
+            UnregisterClass(_className, _hInstance);
+            _className = null;
         }
     }
 
@@ -80,7 +126,14 @@ public sealed class DeviceWatcher : IDisposable
                 var path = Marshal.PtrToStringUni(lParam + 28);
                 if (!string.IsNullOrEmpty(path))
                 {
-                    (wParam == DbtDeviceArrival ? DiskArrived : DiskRemoved)?.Invoke(path);
+                    try
+                    {
+                        (wParam == DbtDeviceArrival ? DiskArrived : DiskRemoved)?.Invoke(path);
+                    }
+                    catch
+                    {
+                        // A subscriber throwing must not tear down the native message pump.
+                    }
                 }
             }
 
@@ -98,16 +151,13 @@ public sealed class DeviceWatcher : IDisposable
 
     public void Dispose()
     {
-        if (_notificationHandle != 0)
+        // Ask the message loop to quit; it releases the window/notification/class on its own thread
+        // (Cleanup) so there is no cross-thread teardown race. If it never started listening, the
+        // thread has already exited and this posts to a null handle (a harmless no-op).
+        var hwnd = _hwnd;
+        if (hwnd != 0)
         {
-            UnregisterDeviceNotification(_notificationHandle);
-            _notificationHandle = 0;
-        }
-
-        if (_hwnd != 0)
-        {
-            PostMessage(_hwnd, WmClose, 0, 0);
-            _hwnd = 0;
+            PostMessage(hwnd, WmClose, 0, 0);
         }
 
         if (_thread.IsAlive)
@@ -161,6 +211,12 @@ public sealed class DeviceWatcher : IDisposable
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern nint CreateWindowEx(uint exStyle, string className, string windowName, uint style,
         int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyWindow(nint hwnd);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool UnregisterClass(string className, nint hInstance);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint DefWindowProc(nint hwnd, uint msg, nint wParam, nint lParam);

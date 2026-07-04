@@ -60,6 +60,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _mountLabel = "";
 
+    /// <summary>True when the open card is genuinely protected (image, or every volume locked).</summary>
+    [ObservableProperty]
+    private bool _isCardProtected = true;
+
+    /// <summary>Trust-banner headline reflecting the real protection outcome (never hardcoded).</summary>
+    [ObservableProperty]
+    private string _protectionHeadline = "Card locked · Read-only";
+
+    [ObservableProperty]
+    private string _protectionDetail = "Footage cannot be changed or deleted.";
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SearchHasText))]
     private string _searchText = "";
@@ -150,8 +161,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Player.ActiveRecordingChanged += OnActiveRecordingChanged;
 
         _watcher = new DeviceWatcher();
-        _watcher.DiskArrived += path => _dispatcher.BeginInvoke(() => { _ = OnDeviceChanged(); });
-        _watcher.DiskRemoved += path => _dispatcher.BeginInvoke(() => { _ = OnDeviceChanged(); });
+        _watcher.DiskArrived += path => _dispatcher.BeginInvoke(() => { _ = OnDeviceArrived(); });
+        _watcher.DiskRemoved += path => _dispatcher.BeginInvoke(() => { _ = OnDeviceRemoved(); });
 
         if (App.StartupImagePath is null)
         {
@@ -162,17 +173,31 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public async Task OpenImageFileAsync(string path) =>
         await OpenCardAsync(() => OpenCard.FromImage(path), $"Opening {Path.GetFileName(path)}…");
 
-    private async Task OnDeviceChanged()
+    private async Task OnDeviceArrived()
     {
-        if (_card is { IsPhysicalDevice: true })
+        if (!IsCardOpen && !IsBusy)
         {
-            // A card is open; a removal may be ours. Verify it still reads; if not, close.
+            await ScanAndOpenAsync();
+        }
+    }
+
+    private async Task OnDeviceRemoved()
+    {
+        if (_card is not { IsPhysicalDevice: true, DiskNumber: { } diskNumber })
+        {
             return;
         }
 
-        if (!IsCardOpen)
+        // Our card may be the device that was removed. Re-enumerate: if our disk number is gone, or its
+        // slot now reports no media, the card is no longer present — close it and return to the waiting
+        // state rather than leaving a dead session whose next read would throw.
+        var stillPresent = await Task.Run(() =>
+            DiskEnumerator.GetPhysicalDisks().Any(d => d.DiskNumber == diskNumber && d.SizeBytes > 0));
+
+        if (!stillPresent)
         {
-            await ScanAndOpenAsync();
+            CloseCardInternal();
+            WaitingMessage = "The card was removed. Insert an Axis camera SD card to begin.";
         }
     }
 
@@ -436,9 +461,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var label = card.VolumeLabel is { Length: > 0 } vl ? vl : "Axis";
-        MountLabel = card.IsPhysicalDevice
-            ? $"Locked read-only · ext4 · {label} volume"
-            : $"Image · ext4 · {label} volume";
+
+        // Reflect the ACTUAL protection outcome, never a hardcoded reassurance. An image file needs no
+        // protection; a physical card is "protected" only when every volume was locked.
+        IsCardProtected = !card.IsPhysicalDevice || card.FullyProtected;
+        if (!card.IsPhysicalDevice)
+        {
+            MountLabel = $"Image · ext4 · {label} volume";
+            ProtectionHeadline = "Read-only image";
+            ProtectionDetail = "Opened from a file — the source is never modified.";
+        }
+        else if (card.FullyProtected)
+        {
+            MountLabel = $"Locked read-only · ext4 · {label} volume";
+            ProtectionHeadline = "Card locked · Read-only";
+            ProtectionDetail = "Footage cannot be changed or deleted.";
+        }
+        else
+        {
+            MountLabel = $"NOT fully locked · ext4 · {label} volume";
+            ProtectionHeadline = "Card not fully locked";
+            ProtectionDetail = "Windows still has access — do not click any \"format disk\" prompt.";
+        }
     }
 
     // --- browse tree ---------------------------------------------------------
@@ -839,6 +883,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         ShowExport = false;
         IsBusy = true;
+
+        // Export reads card chunks under the exclusive I/O lock; stop playback first so the VLC demux
+        // thread isn't reading the shared device stream (and doesn't stall behind the whole export).
+        Player.SuspendForExclusiveIo();
+
         var burnNote = IncludeStamp
             ? "\n\nNote: timestamp burn-in needs re-encoding and isn't applied to a lossless export; " +
               "Axis footage already carries a burned-in timestamp."
@@ -847,14 +896,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             var fs = _card.FileSystem!;
             var extension = container == Core.Export.ExportContainer.Mp4 ? "mp4" : "mkv";
+            var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             long totalBytes = 0;
             var index = 0;
 
             foreach (var slice in slices)
             {
                 index++;
-                var name = $"{slice.WallClockStart:yyyy-MM-dd_HH-mm-ss}_{Player.CameraName.Replace(' ', '-')}.{extension}";
-                var outputPath = System.IO.Path.Combine(dialog.FolderName, name);
+                var baseName = $"{slice.WallClockStart:yyyy-MM-dd_HH-mm-ss}_{SanitizeForFileName(Player.CameraName)}";
+                // Never silently overwrite: disambiguate against files produced earlier in this run and
+                // any pre-existing files in the destination.
+                var outputPath = UniqueOutputPath(dialog.FolderName, baseName, extension, usedPaths);
 
                 var progress = new Progress<Core.Export.FfmpegProgress>(p =>
                     BusyText = slices.Count > 1
@@ -944,8 +996,34 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         return gb >= 1000 ? $"{gb / 1024:F1} TB" : $"{gb:F0} GB";
     }
 
+    /// <summary>Makes a camera name safe for a file name: invalid characters and spaces become '-'.</summary>
+    private static string SanitizeForFileName(string? name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var cleaned = new string((name ?? "").Select(c => invalid.Contains(c) || c == ' ' ? '-' : c).ToArray())
+            .Trim('-');
+        return cleaned.Length > 0 ? cleaned : "camera";
+    }
+
+    /// <summary>Returns a destination path that collides with neither a file produced earlier in this run
+    /// (<paramref name="used"/>) nor an existing file on disk, appending " (2)", " (3)", … as needed.</summary>
+    private static string UniqueOutputPath(string directory, string baseName, string extension, HashSet<string> used)
+    {
+        var path = Path.Combine(directory, $"{baseName}.{extension}");
+        var n = 2;
+        while (used.Contains(path) || File.Exists(path))
+        {
+            path = Path.Combine(directory, $"{baseName} ({n}).{extension}");
+            n++;
+        }
+
+        used.Add(path);
+        return path;
+    }
+
     public void Dispose()
     {
+        Player.ActiveRecordingChanged -= OnActiveRecordingChanged;
         CloseCardInternal();
         Player.Dispose();
         _watcher.Dispose();

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace AxisSdReader.Core.Disk;
@@ -170,7 +171,20 @@ public static class DiskEnumerator
         var buffer = new char[1024];
         if (!NativeMethods.GetVolumePathNamesForVolumeName(volumeGuidPath, buffer, buffer.Length, out var length))
         {
-            return [];
+            // ERROR_MORE_DATA: the volume has more mount points than fit; grow to the required size
+            // and retry once, so a busy volume's drive letter is still found (and can be removed).
+            if (Marshal.GetLastWin32Error() == NativeMethods.ErrorMoreData && length > buffer.Length)
+            {
+                buffer = new char[length];
+                if (!NativeMethods.GetVolumePathNamesForVolumeName(volumeGuidPath, buffer, buffer.Length, out length))
+                {
+                    return [];
+                }
+            }
+            else
+            {
+                return [];
+            }
         }
 
         // REG_MULTI_SZ-style: NUL-separated strings with a final double-NUL.
