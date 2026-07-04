@@ -227,7 +227,16 @@ public sealed partial class ClipRow : BrowseRow
             ? recording.StartTime.ToLocalTime()
             : recording.StartTime;
         var duration = recording.Duration ?? TimeSegment.EstimateDuration(recording);
-        var end = start + duration;
+
+        // Defend against a pathological duration (e.g. a corrupt on-card header) so start + duration can
+        // never overflow DateTime and crash the browse tree.
+        if (duration < TimeSpan.Zero)
+        {
+            duration = TimeSpan.Zero;
+        }
+
+        var maxDuration = DateTime.MaxValue - start;
+        var end = duration > maxDuration ? DateTime.MaxValue : start + duration;
         return ($"{start:HH:mm} – {end:HH:mm}", PlaybackViewModel.FormatDuration(duration));
     }
 }

@@ -223,6 +223,7 @@ public sealed class TimelineControl : FrameworkElement
         var startLocal = TimeAxis.ToDateTime(leftSeconds);
         var localMidnight = startLocal.Date;
         var secondsIntoDay = Math.Floor((startLocal - localMidnight).TotalSeconds / step) * step;
+        var lastX = double.NaN;
         for (var boundary = localMidnight.AddSeconds(secondsIntoDay); ; boundary = boundary.AddSeconds(step))
         {
             var t = TimeAxis.ToSeconds(boundary);
@@ -237,9 +238,19 @@ public sealed class TimelineControl : FrameworkElement
                 continue;
             }
 
-            var isMidnight = boundary.TimeOfDay == TimeSpan.Zero;
+            if (Math.Abs(x - lastX) < 1)
+            {
+                continue; // collapse ticks landing on the same pixel (the skipped spring-forward hour)
+            }
+
+            lastX = x;
+
+            // Label from the tick's ACTUAL local time (ToDateTime of its axis position), not the iterated
+            // boundary, so a nonexistent local time on a spring-forward day reads truthfully.
+            var time = TimeAxis.ToDateTime(t);
+            var isMidnight = time.TimeOfDay == TimeSpan.Zero;
             dc.DrawLine(isMidnight ? dayPen : gridPen, new Point(x, trackTop + 1), new Point(x, trackTop + TrackHeight - 1));
-            labels.Add((x, isMidnight ? boundary.ToString("MMM d") : boundary.ToString(span <= 900 ? "HH:mm:ss" : "HH:mm"), isMidnight));
+            labels.Add((x, isMidnight ? time.ToString("MMM d") : time.ToString(span <= 900 ? "HH:mm:ss" : "HH:mm"), isMidnight));
         }
 
         // Segments with inline labels when wide enough.

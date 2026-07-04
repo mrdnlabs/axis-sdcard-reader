@@ -207,14 +207,17 @@ public static class MkvMetadataReader
             truncated = true;
         }
 
-        // Reject NaN/±Infinity (a crafted 8-byte float Duration), non-positive values, AND finite-but-huge
-        // magnitudes: casting an out-of-range double to long wraps to a negative/garbage TimeSpan, so
-        // range-check the tick count before the cast.
+        // Reject NaN/±Infinity (a crafted 8-byte float Duration), non-positive values, AND out-of-range
+        // magnitudes. The ceiling is a real-world maximum well below 2^63, NOT long.MaxValue: (double)
+        // long.MaxValue rounds UP to exactly 2^63, so a computed ticks value of 2^63 would pass a
+        // `<= long.MaxValue` check and then wrap on the (long) cast to a garbage TimeSpan that overflows
+        // DateTime arithmetic downstream (crashing the browse UI). ~200 years covers any real recording.
+        const double MaxDurationTicks = (double)TimeSpan.TicksPerDay * 366 * 200;
         TimeSpan? duration = null;
         if (durationTicks is { } d && double.IsFinite(d) && d > 0)
         {
             var ticks = d * timestampScale / 100.0;
-            if (ticks is >= 1 and <= long.MaxValue)
+            if (ticks is >= 1 and <= MaxDurationTicks)
             {
                 duration = TimeSpan.FromTicks((long)ticks);
             }

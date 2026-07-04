@@ -16,6 +16,7 @@ public sealed class OpenCard : IDisposable
     private readonly SdCardSession? _session;   // physical device (owns reader + guard)
     private readonly CardReader _reader;        // image files: owned directly
     private readonly SemaphoreSlim _ioLock = new(1, 1);
+    private volatile bool _disposed;
 
     private OpenCard(SdCardSession? session, CardReader reader, string description, bool isPhysicalDevice,
         long? capacityBytes)
@@ -86,17 +87,21 @@ public sealed class OpenCard : IDisposable
     /// <summary>Runs a card I/O operation with exclusive access, off the calling thread.</summary>
     public async Task<T> RunExclusive<T>(Func<T> operation)
     {
+        // If the card was (or is being) torn down, cancel cleanly instead of throwing
+        // ObjectDisposedException off a disposed lock — a card pulled mid-operation is expected, not an error.
+        ThrowIfDisposed();
+
         // ConfigureAwait(false): the lock release must run off the UI thread. OpenChunk takes this same
         // lock with a synchronous Wait() on the UI thread, so if the release continuation were marshaled
         // back to a blocked UI thread the two would deadlock.
-        await _ioLock.WaitAsync().ConfigureAwait(false);
+        await WaitLockAsync(CancellationToken.None).ConfigureAwait(false);
         try
         {
             return await Task.Run(operation).ConfigureAwait(false);
         }
         finally
         {
-            _ioLock.Release();
+            ReleaseLock();
         }
     }
 
@@ -104,7 +109,8 @@ public sealed class OpenCard : IDisposable
     /// (e.g. copy chunks off the card then run FFmpeg), so nothing else touches the shared stream.</summary>
     public async Task<T> RunExclusiveAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
     {
-        await _ioLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        ThrowIfDisposed();
+        await WaitLockAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             // Start the operation on the thread pool (not the calling UI thread) so none of its internal
@@ -113,7 +119,41 @@ public sealed class OpenCard : IDisposable
         }
         finally
         {
+            ReleaseLock();
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+        {
+            throw new OperationCanceledException("The card was closed.");
+        }
+    }
+
+    /// <summary>Waits on the I/O lock, translating a dispose that races this call into a cancellation.</summary>
+    private async Task WaitLockAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _ioLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            throw new OperationCanceledException("The card was closed.");
+        }
+    }
+
+    /// <summary>Releases the I/O lock, tolerating a dispose that already tore it down.</summary>
+    private void ReleaseLock()
+    {
+        try
+        {
             _ioLock.Release();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Card was disposed while this operation was running; nothing to release.
         }
     }
 
@@ -158,6 +198,7 @@ public sealed class OpenCard : IDisposable
     /// </summary>
     public Stream OpenChunk(RecordingChunk chunk)
     {
+        ThrowIfDisposed();
         var fs = FileSystem ?? throw new InvalidOperationException("No filesystem is open.");
         _ioLock.Wait();
         try
@@ -173,6 +214,11 @@ public sealed class OpenCard : IDisposable
 
     public void Dispose()
     {
+        // Mark disposed FIRST so any RunExclusive/OpenChunk caller that races this teardown cancels cleanly
+        // rather than throwing ObjectDisposedException off the disposed lock. Callers must still have
+        // quiesced active reads (the app stops playback before closing the card).
+        _disposed = true;
+
         if (_session is not null)
         {
             _session.Dispose(); // disposes reader + releases volume locks

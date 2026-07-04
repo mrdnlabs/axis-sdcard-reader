@@ -37,17 +37,20 @@ public class MkvMetadataReaderTests
         Assert.Null(meta!.Duration);
     }
 
-    [Fact]
-    public void FiniteButHugeHeaderDurationIsRejected()
+    [Theory]
+    [InlineData(1e300)]                        // finite-but-astronomically-huge
+    [InlineData(9.223372036854776E18)]         // == 2^63 exactly: the double-rounding boundary of long.MaxValue
+    public void OutOfRangeHeaderDurationIsRejected(double durationValue)
     {
-        // A finite but enormous Duration would overflow the (long) cast in the tick math and wrap to a
-        // negative/garbage TimeSpan — it must be rejected, like the non-finite case.
+        // These must all degrade to "no duration": in particular a value that makes ticks == 2^63 would
+        // pass a naive `<= long.MaxValue` check ((double)long.MaxValue rounds up to 2^63) and then wrap on
+        // the cast to a ~10.6M-day TimeSpan that overflows DateTime math downstream.
         var mkv = Concat(
             Elem(Ebml, [0x42, 0x87, 0x81, 0x01]),
             Elem(Segment, Concat(
                 Elem(SegmentInfo, Concat(
-                    Elem(TimestampScale, UIntBytes(1_000_000)),
-                    Elem(Duration, DoubleBe(1e300)))))));
+                    Elem(TimestampScale, UIntBytes(100)), // scale=100 => ticks == durationValue
+                    Elem(Duration, DoubleBe(durationValue)))))));
 
         var meta = MkvMetadataReader.Read(new MemoryStream(mkv), scanClustersForDuration: false);
 
