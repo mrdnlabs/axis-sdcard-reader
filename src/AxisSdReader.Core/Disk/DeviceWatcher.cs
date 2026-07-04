@@ -152,12 +152,13 @@ public sealed class DeviceWatcher : IDisposable
     public void Dispose()
     {
         // Ask the message loop to quit; it releases the window/notification/class on its own thread
-        // (Cleanup) so there is no cross-thread teardown race. If it never started listening, the
-        // thread has already exited and this posts to a null handle (a harmless no-op).
-        var hwnd = _hwnd;
-        if (hwnd != 0)
+        // (Cleanup) so there is no cross-thread teardown race. Only the listening path has a live loop
+        // and a valid window to post to; when not listening, the watcher thread has already run Cleanup
+        // and exited, so posting is unnecessary (and _hwnd may already be zeroed on that thread). Gating
+        // on the volatile _listening also gives an ordered read of _hwnd.
+        if (_listening)
         {
-            PostMessage(hwnd, WmClose, 0, 0);
+            PostMessage(_hwnd, WmClose, 0, 0);
         }
 
         if (_thread.IsAlive)

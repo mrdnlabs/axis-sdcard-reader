@@ -207,11 +207,18 @@ public static class MkvMetadataReader
             truncated = true;
         }
 
-        // Reject NaN and ±Infinity (a crafted 8-byte float Duration) as well as non-positive
-        // values; a non-finite duration would otherwise produce a garbage/huge TimeSpan.
-        TimeSpan? duration = durationTicks is { } d && double.IsFinite(d) && d > 0
-            ? TimeSpan.FromTicks((long)(d * timestampScale / 100.0))
-            : null;
+        // Reject NaN/±Infinity (a crafted 8-byte float Duration), non-positive values, AND finite-but-huge
+        // magnitudes: casting an out-of-range double to long wraps to a negative/garbage TimeSpan, so
+        // range-check the tick count before the cast.
+        TimeSpan? duration = null;
+        if (durationTicks is { } d && double.IsFinite(d) && d > 0)
+        {
+            var ticks = d * timestampScale / 100.0;
+            if (ticks is >= 1 and <= long.MaxValue)
+            {
+                duration = TimeSpan.FromTicks((long)ticks);
+            }
+        }
 
         // No usable header duration (live-muxed files carry none, unfinalized camera files
         // carry a 0 placeholder): derive one from the cluster/block timestamps.

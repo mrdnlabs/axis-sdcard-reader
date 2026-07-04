@@ -214,22 +214,32 @@ public sealed class TimelineControl : FrameworkElement
 
         dc.PushClip(new RectangleGeometry(trackRect));
 
-        // Gridlines + collect tick label positions.
+        // Gridlines + collect tick label positions. Anchor ticks to LOCAL wall-clock boundaries
+        // (multiples of `step` from local midnight), not to UTC-second multiples: on the UTC axis the
+        // latter drift off round local times — and never coincide with midnight — in half-hour-offset
+        // zones and at wide zoom. Every TickStep divides 86400, so boundaries stay aligned across days.
         var step = TickStep(span);
         var labels = new List<(double X, string Text, bool Day)>();
-        var firstTick = Math.Floor(leftSeconds / step) * step;
-        for (var t = firstTick; t <= rightSeconds + step; t += step)
+        var startLocal = TimeAxis.ToDateTime(leftSeconds);
+        var localMidnight = startLocal.Date;
+        var secondsIntoDay = Math.Floor((startLocal - localMidnight).TotalSeconds / step) * step;
+        for (var boundary = localMidnight.AddSeconds(secondsIntoDay); ; boundary = boundary.AddSeconds(step))
         {
+            var t = TimeAxis.ToSeconds(boundary);
+            if (t > rightSeconds + step)
+            {
+                break;
+            }
+
             var x = Math.Round((t - leftSeconds) / spp) + 0.5;
             if (x < -60 || x > width + 60)
             {
                 continue;
             }
 
-            var time = TimeAxis.ToDateTime(t);
-            var isMidnight = time.TimeOfDay == TimeSpan.Zero;
+            var isMidnight = boundary.TimeOfDay == TimeSpan.Zero;
             dc.DrawLine(isMidnight ? dayPen : gridPen, new Point(x, trackTop + 1), new Point(x, trackTop + TrackHeight - 1));
-            labels.Add((x, isMidnight ? time.ToString("MMM d") : time.ToString(span <= 900 ? "HH:mm:ss" : "HH:mm"), isMidnight));
+            labels.Add((x, isMidnight ? boundary.ToString("MMM d") : boundary.ToString(span <= 900 ? "HH:mm:ss" : "HH:mm"), isMidnight));
         }
 
         // Segments with inline labels when wide enough.

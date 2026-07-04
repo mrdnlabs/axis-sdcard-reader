@@ -38,6 +38,24 @@ public class MkvMetadataReaderTests
     }
 
     [Fact]
+    public void FiniteButHugeHeaderDurationIsRejected()
+    {
+        // A finite but enormous Duration would overflow the (long) cast in the tick math and wrap to a
+        // negative/garbage TimeSpan — it must be rejected, like the non-finite case.
+        var mkv = Concat(
+            Elem(Ebml, [0x42, 0x87, 0x81, 0x01]),
+            Elem(Segment, Concat(
+                Elem(SegmentInfo, Concat(
+                    Elem(TimestampScale, UIntBytes(1_000_000)),
+                    Elem(Duration, DoubleBe(1e300)))))));
+
+        var meta = MkvMetadataReader.Read(new MemoryStream(mkv), scanClustersForDuration: false);
+
+        Assert.NotNull(meta);
+        Assert.Null(meta!.Duration);
+    }
+
+    [Fact]
     public void FiveByteElementIdIsSkippedNotAborted()
     {
         // A legal but unhandled 5-byte element ID used to be misread as EOF, aborting the whole parse.

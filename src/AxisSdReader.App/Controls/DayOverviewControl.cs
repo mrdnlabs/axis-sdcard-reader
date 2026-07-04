@@ -15,7 +15,6 @@ namespace AxisSdReader.App.Controls;
 /// </summary>
 public sealed class DayOverviewControl : FrameworkElement
 {
-    private const double Day = 86400.0;
     private const double StripHeight = 18.0;
 
     public event Action<double>? JumpRequested;
@@ -84,18 +83,24 @@ public sealed class DayOverviewControl : FrameworkElement
         return new Size(width, StripHeight);
     }
 
-    /// <summary>Axis seconds at local midnight of the day containing the playhead.</summary>
-    private double DayStartSeconds()
+    /// <summary>
+    /// Axis-second bounds of the local day containing the playhead: its start (local midnight) and its
+    /// real length in axis seconds. The length is 86400 on a normal day but 82800/90000 across a
+    /// daylight-saving change, since a UTC-based axis makes a local day no longer a fixed 24h.
+    /// </summary>
+    private (double Start, double Length) DayBounds()
     {
         var midnight = TimeAxis.ToDateTime(CenterSeconds).Date;
-        return TimeAxis.ToSeconds(midnight);
+        var start = TimeAxis.ToSeconds(midnight);
+        return (start, TimeAxis.ToSeconds(midnight.AddDays(1)) - start);
     }
 
     protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
     {
         base.OnMouseLeftButtonDown(e);
         var fraction = Math.Clamp(e.GetPosition(this).X / Math.Max(1, ActualWidth), 0, 1);
-        JumpRequested?.Invoke(DayStartSeconds() + fraction * Day);
+        var (start, length) = DayBounds();
+        JumpRequested?.Invoke(start + fraction * length);
     }
 
     protected override void OnRender(DrawingContext dc)
@@ -106,17 +111,20 @@ public sealed class DayOverviewControl : FrameworkElement
             return;
         }
 
-        var dayStart = DayStartSeconds();
+        var midnight = TimeAxis.ToDateTime(CenterSeconds).Date;
+        var dayStart = TimeAxis.ToSeconds(midnight);
+        var day = TimeAxis.ToSeconds(midnight.AddDays(1)) - dayStart; // 86400, or 82800/90000 across DST
         var strip = new Rect(0, 0, width, StripHeight);
         dc.DrawRoundedRectangle(Theme.Brush("Subtle2"), new Pen(Theme.Brush("TlBorder"), 1), Inset(strip, 0.5), 5, 5);
 
         dc.PushClip(new RectangleGeometry(strip));
 
-        // 6/12/18h gridlines.
+        // 6/12/18h gridlines, placed at where each LOCAL hour actually falls on the axis (so they track
+        // the footage under them on DST days rather than at fixed 1/4 fractions).
         var gridPen = new Pen(Theme.Brush("TlLine"), 1);
         foreach (var h in new[] { 6, 12, 18 })
         {
-            var x = Math.Round(h * 3600 / Day * width) + 0.5;
+            var x = Math.Round((TimeAxis.ToSeconds(midnight.AddHours(h)) - dayStart) / day * width) + 0.5;
             dc.DrawLine(gridPen, new Point(x, 1), new Point(x, StripHeight - 1));
         }
 
@@ -135,13 +143,13 @@ public sealed class DayOverviewControl : FrameworkElement
 
                 var s = segment.StartSeconds - dayStart;
                 var e = segment.EndSeconds - dayStart;
-                if (e < 0 || s > Day)
+                if (e < 0 || s > day)
                 {
                     continue;
                 }
 
-                var x1 = Math.Max(0, s) / Day * width;
-                var x2 = Math.Min(Day, e) / Day * width;
+                var x1 = Math.Max(0, s) / day * width;
+                var x2 = Math.Min(day, e) / day * width;
                 dc.DrawRoundedRectangle(segBrush, null, new Rect(x1, 4, Math.Max(1.5, x2 - x1), 10), 2, 2);
             }
         }
@@ -150,18 +158,18 @@ public sealed class DayOverviewControl : FrameworkElement
         if (SelInSeconds is { } inSec && SelOutSeconds is { } outSec && outSec > inSec)
         {
             var s = Math.Max(0, inSec - dayStart);
-            var e = Math.Min(Day, outSec - dayStart);
-            if (e > 0 && s < Day)
+            var e = Math.Min(day, outSec - dayStart);
+            if (e > 0 && s < day)
             {
-                dc.DrawRectangle(Theme.Brush("Sel"), null, new Rect(s / Day * width, StripHeight - 3.5, Math.Max(2, (e - s) / Day * width), 2.5));
+                dc.DrawRectangle(Theme.Brush("Sel"), null, new Rect(s / day * width, StripHeight - 3.5, Math.Max(2, (e - s) / day * width), 2.5));
             }
         }
 
         dc.Pop();
 
         // Viewport rectangle for the zoomed window.
-        var viewLeft = (CenterSeconds - SpanSeconds / 2 - dayStart) / Day * width;
-        var viewRight = (CenterSeconds + SpanSeconds / 2 - dayStart) / Day * width;
+        var viewLeft = (CenterSeconds - SpanSeconds / 2 - dayStart) / day * width;
+        var viewRight = (CenterSeconds + SpanSeconds / 2 - dayStart) / day * width;
         viewLeft = Math.Clamp(viewLeft, 0, width);
         viewRight = Math.Clamp(viewRight, 0, width);
         if (viewRight - viewLeft >= 1)
@@ -171,7 +179,7 @@ public sealed class DayOverviewControl : FrameworkElement
         }
 
         // Cursor tick at the current time.
-        var cx = Math.Clamp((CenterSeconds - dayStart) / Day, 0, 1) * width;
+        var cx = Math.Clamp((CenterSeconds - dayStart) / day, 0, 1) * width;
         dc.DrawRectangle(Theme.Brush("Playhead"), null, new Rect(cx - 0.75, 0, 1.5, StripHeight));
     }
 

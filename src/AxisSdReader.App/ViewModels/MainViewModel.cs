@@ -944,6 +944,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void CloseCardInternal()
     {
+        // Stop playback FIRST: this halts VLC's demux thread and disposes the current chunk stream while
+        // the card's I/O lock and device stream are still valid. Disposing the card out from under a live
+        // demux read would be a use-after-dispose on the shared stream (and throw ObjectDisposedException
+        // from the stream's lock). Reached on card pull, Close, and re-open — all can happen mid-playback.
+        Player.SuspendForExclusiveIo();
         Player.ClearSelection();
         Rows.Clear();
         _clipRows.Clear();
