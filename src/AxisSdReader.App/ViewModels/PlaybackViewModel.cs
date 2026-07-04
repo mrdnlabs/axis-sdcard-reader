@@ -320,7 +320,15 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         // which can shift the estimated end. Re-resolve afterwards.
         if (!segment.IsRefined && _card is not null)
         {
-            await _card.LoadMetadataAsync(segment.Recording);
+            try
+            {
+                await _card.LoadMetadataAsync(segment.Recording);
+            }
+            catch (OperationCanceledException)
+            {
+                return; // the card was closed/removed while metadata was loading — nothing to do
+            }
+
             if (version != _seekVersion)
             {
                 return; // a newer seek superseded this one while metadata loaded
@@ -643,6 +651,20 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
     /// position is kept, so pressing play resumes from where the user was.
     /// </summary>
     public void SuspendForExclusiveIo() => StopPlayback();
+
+    /// <summary>
+    /// Stops playback and forgets the card entirely — used when the card is being closed/removed so no
+    /// later seek or callback dereferences the disposed card. Clears segments and footage state.
+    /// </summary>
+    public void DetachCard()
+    {
+        StopPlayback();
+        _card = null;
+        _segments = [];
+        _activeSegment = -1;
+        TimelineSegments.Clear();
+        HasFootage = false;
+    }
 
     private void DisposeCurrentMedia()
     {

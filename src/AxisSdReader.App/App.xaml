@@ -7,8 +7,6 @@
         <local:InverseBoolToVisibilityConverter x:Key="InverseBoolToVis" />
         <local:NumberEqualsConverter x:Key="NumberEquals" />
         <local:StringEqualsConverter x:Key="StringEquals" />
-        <local:RateActiveBackgroundConverter x:Key="RateBg" />
-        <local:RateActiveForegroundConverter x:Key="RateFg" />
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
         <FontFamily x:Key="MonoFont">Consolas, Cascadia Code, monospace</FontFamily>

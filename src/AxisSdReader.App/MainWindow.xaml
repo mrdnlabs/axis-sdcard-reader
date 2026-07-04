@@ -846,33 +846,37 @@
                                                 <Setter Property="FontSize" Value="12" />
                                                 <Setter Property="FontWeight" Value="Bold" />
                                                 <Setter Property="Command" Value="{Binding Player.SetRateCommand}" />
+                                                <Setter Property="Foreground" Value="{DynamicResource T.Text3}" />
                                                 <Setter Property="Template">
                                                     <Setter.Value>
+                                                        <!-- Active pill (Tag=true when Rate matches) uses DynamicResource brushes so it
+                                                             re-themes live on an accent/theme switch. -->
                                                         <ControlTemplate TargetType="Button">
-                                                            <Border CornerRadius="6" Padding="8,0" Background="{TemplateBinding Background}"
+                                                            <Border x:Name="Pill" CornerRadius="6" Padding="8,0" Background="Transparent"
                                                                     TextElement.Foreground="{TemplateBinding Foreground}">
                                                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                             </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Value="True">
+                                                                    <Setter TargetName="Pill" Property="Background" Value="{DynamicResource T.Accent}" />
+                                                                    <Setter TargetName="Pill" Property="TextElement.Foreground" Value="White" />
+                                                                </DataTrigger>
+                                                            </ControlTemplate.Triggers>
                                                         </ControlTemplate>
                                                     </Setter.Value>
                                                 </Setter>
                                             </Style>
                                         </StackPanel.Resources>
                                         <Button Style="{StaticResource SpeedButton}" Content="0.5×" CommandParameter="0.5"
-                                                Background="{Binding Player.Rate, Converter={StaticResource RateBg}, ConverterParameter=0.5}"
-                                                Foreground="{Binding Player.Rate, Converter={StaticResource RateFg}, ConverterParameter=0.5}" />
+                                                Tag="{Binding Player.Rate, Converter={StaticResource NumberEquals}, ConverterParameter=0.5}" />
                                         <Button Style="{StaticResource SpeedButton}" Content="1×" CommandParameter="1"
-                                                Background="{Binding Player.Rate, Converter={StaticResource RateBg}, ConverterParameter=1}"
-                                                Foreground="{Binding Player.Rate, Converter={StaticResource RateFg}, ConverterParameter=1}" />
+                                                Tag="{Binding Player.Rate, Converter={StaticResource NumberEquals}, ConverterParameter=1}" />
                                         <Button Style="{StaticResource SpeedButton}" Content="2×" CommandParameter="2"
-                                                Background="{Binding Player.Rate, Converter={StaticResource RateBg}, ConverterParameter=2}"
-                                                Foreground="{Binding Player.Rate, Converter={StaticResource RateFg}, ConverterParameter=2}" />
+                                                Tag="{Binding Player.Rate, Converter={StaticResource NumberEquals}, ConverterParameter=2}" />
                                         <Button Style="{StaticResource SpeedButton}" Content="4×" CommandParameter="4"
-                                                Background="{Binding Player.Rate, Converter={StaticResource RateBg}, ConverterParameter=4}"
-                                                Foreground="{Binding Player.Rate, Converter={StaticResource RateFg}, ConverterParameter=4}" />
+                                                Tag="{Binding Player.Rate, Converter={StaticResource NumberEquals}, ConverterParameter=4}" />
                                         <Button Style="{StaticResource SpeedButton}" Content="8×" CommandParameter="8"
-                                                Background="{Binding Player.Rate, Converter={StaticResource RateBg}, ConverterParameter=8}"
-                                                Foreground="{Binding Player.Rate, Converter={StaticResource RateFg}, ConverterParameter=8}" />
+                                                Tag="{Binding Player.Rate, Converter={StaticResource NumberEquals}, ConverterParameter=8}" />
                                     </StackPanel>
                                 </Border>
 
