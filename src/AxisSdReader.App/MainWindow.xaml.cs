@@ -10,7 +10,7 @@ namespace AxisSdReader.App;
 public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
-    private nint _videoHwnd;
+    private readonly HashSet<nint> _blackenedWindows = [];
     private SubclassProc? _videoSubclass; // kept referenced so the GC can't collect the callback
 
     public MainWindow()
@@ -25,13 +25,15 @@ public partial class MainWindow : Window
         SourceInitialized += OnSourceInitialized;
         Closed += (_, _) => _viewModel.Dispose();
 
-        // LibVLCSharp.WPF hosts the video in a Win32 "Static" control whose background is the
-        // white system colour. When a seek tears down/rebuilds libvlc's video output, that white
-        // flashes through for ~1s. Subclass the Static window and paint its background black so
-        // any transition clears to black. The window is created after the MediaPlayer (built on a
-        // background thread) is attached, so poll until it exists.
-        var blackener = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
-        blackener.Tick += (_, _) => TryBlackenVideoWindow(blackener);
+        // LibVLCSharp.WPF hosts the video in a stack of Win32 windows: a "Static" control holding
+        // libvlc's "VLC video main" (D3D11) output, inside which the actual "VLC video output"
+        // sits. The D3D11 window's default background is the white system colour, so it shows as
+        // white in the letterbox bars (portrait video in a landscape area) and while a seek
+        // rebuilds the output. These windows are created after playback starts and may be
+        // recreated, so poll and subclass any not-yet-handled one to paint its background black.
+        _videoSubclass = VideoSubclassProc;
+        var blackener = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        blackener.Tick += (_, _) => BlackenVideoWindows();
         blackener.Start();
 
         if (App.StartupImagePath is { } imagePath)
@@ -40,44 +42,28 @@ public partial class MainWindow : Window
         }
     }
 
-    private void TryBlackenVideoWindow(DispatcherTimer timer)
+    private void BlackenVideoWindows()
     {
-        if (_videoHwnd != nint.Zero)
-        {
-            timer.Stop();
-            return;
-        }
-
         var host = new WindowInteropHelper(this).Handle;
         if (host == nint.Zero)
         {
             return;
         }
 
-        nint found = nint.Zero;
         EnumChildWindows(host, (h, _) =>
         {
             var sb = new StringBuilder(64);
             GetClassName(h, sb, sb.Capacity);
-            if (sb.ToString() == "Static")
+            var cls = sb.ToString();
+            if ((cls.StartsWith("VLC video", StringComparison.Ordinal) || cls == "Static") && _blackenedWindows.Add(h))
             {
-                found = h;
-                return false; // stop enumerating
+                SetWindowSubclass(h, _videoSubclass!, 1, nint.Zero);
+                SetClassLongPtr(h, GclpHbrBackground, GetStockObject(BlackBrush));
+                InvalidateRect(h, nint.Zero, true);
             }
 
             return true;
         }, nint.Zero);
-
-        if (found == nint.Zero)
-        {
-            return;
-        }
-
-        _videoHwnd = found;
-        _videoSubclass = VideoSubclassProc;
-        SetWindowSubclass(found, _videoSubclass, 1, nint.Zero);
-        InvalidateRect(found, nint.Zero, true);
-        timer.Stop();
     }
 
     private nint VideoSubclassProc(nint hWnd, uint msg, nint wParam, nint lParam, nint idSubclass, nint refData)
@@ -94,8 +80,12 @@ public partial class MainWindow : Window
     }
 
     private const int BlackBrush = 4;
+    private const int GclpHbrBackground = -10;
 
     private delegate nint SubclassProc(nint hWnd, uint msg, nint wParam, nint lParam, nint idSubclass, nint refData);
+
+    [DllImport("user32.dll", EntryPoint = "SetClassLongPtrW")]
+    private static extern nint SetClassLongPtr(nint hwnd, int index, nint value);
 
     [DllImport("user32.dll")]
     private static extern bool EnumChildWindows(nint parent, EnumChildProc callback, nint lParam);
