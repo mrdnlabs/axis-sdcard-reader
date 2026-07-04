@@ -215,8 +215,61 @@
             </Button>
         </DataTemplate>
 
+        <!-- Lens row (only shown for multi-sensor cameras) -->
+        <DataTemplate DataType="{x:Type vm:LensRow}">
+            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="34" Margin="{Binding Indent}"
+                    AutomationProperties.Name="{Binding Label}">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="B" Background="Transparent" CornerRadius="7" Padding="8,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Path x:Name="Caret" Grid.Column="0" Width="6" Height="8" Margin="0,0,9,0"
+                                      VerticalAlignment="Center" Fill="{DynamicResource T.Muted3}" Data="M0,0 L6,4 L0,8 Z"
+                                      RenderTransformOrigin="0.4,0.5" />
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Width="18" Height="18" CornerRadius="5" Background="{DynamicResource T.Chip}" Margin="0,0,8,0">
+                                        <TextBlock Text="{Binding Node.SourceToken}" FontFamily="{StaticResource MonoFont}"
+                                                   FontSize="10.5" FontWeight="Bold" Foreground="{DynamicResource T.Muted2}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" x:Name="Badge" />
+                                    </Border>
+                                    <TextBlock x:Name="Label" Text="{Binding Label}" FontSize="12.5" FontWeight="Medium"
+                                               Foreground="{DynamicResource T.Text2}" />
+                                    <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="{DynamicResource T.Muted3}" Margin="7,0,0,0"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="2" Text="{Binding Badge}" FontSize="10.5" Foreground="{DynamicResource T.Muted3}" VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.Hover}" />
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                <Setter TargetName="Caret" Property="RenderTransform">
+                                    <Setter.Value>
+                                        <RotateTransform Angle="90" />
+                                    </Setter.Value>
+                                </Setter>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                <Setter TargetName="B" Property="Background" Value="{DynamicResource T.AccentTint}" />
+                                <Setter TargetName="Label" Property="Foreground" Value="{DynamicResource T.AccentInk}" />
+                                <Setter TargetName="Caret" Property="Fill" Value="{DynamicResource T.AccentInk}" />
+                                <Setter TargetName="Badge" Property="Foreground" Value="{DynamicResource T.AccentInk}" />
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
+            </Button>
+        </DataTemplate>
+
         <DataTemplate DataType="{x:Type vm:DateRow}">
-            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="34" Margin="20,0,0,0"
+            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="34" Margin="{Binding Indent}"
                     AutomationProperties.Name="{Binding Label}">
                 <Button.Template>
                     <ControlTemplate TargetType="Button">
@@ -259,7 +312,7 @@
         </DataTemplate>
 
         <DataTemplate DataType="{x:Type vm:ClipRow}">
-            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="38" Margin="40,0,0,0"
+            <Button Command="{Binding Command}" CommandParameter="{Binding}" Cursor="Hand" Height="38" Margin="{Binding Indent}"
                     AutomationProperties.Name="{Binding TimeRange}">
                 <Button.Template>
                     <ControlTemplate TargetType="Button">

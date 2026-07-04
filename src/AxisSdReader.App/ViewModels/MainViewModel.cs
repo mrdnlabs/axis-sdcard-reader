@@ -76,6 +76,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string? _selectedDateKey;
     private string? _loadedCameraSerial;
     private readonly HashSet<string> _expandedCameras = [];
+    private readonly HashSet<string> _expandedLenses = [];
     private readonly HashSet<string> _expandedDates = [];
 
     // --- lens bar --------------------------------------------------------------
@@ -277,17 +278,27 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ApplyCardIdentity(card, index);
 
             _expandedCameras.Clear();
+            _expandedLenses.Clear();
             _expandedDates.Clear();
-            _selectedCameraSerial = _cameras.FirstOrDefault()?.Serial;
-            _selectedDateKey = _cameras.FirstOrDefault()?.Dates.FirstOrDefault()?.Key;
-            if (_selectedCameraSerial is not null)
-            {
-                _expandedCameras.Add(_selectedCameraSerial);
-            }
+            _selectedDateKey = null;
 
-            if (_selectedDateKey is not null)
+            var firstCamera = _cameras.FirstOrDefault();
+            _selectedCameraSerial = firstCamera?.Serial;
+            if (firstCamera is not null)
             {
-                _expandedDates.Add(_selectedDateKey);
+                _expandedCameras.Add(firstCamera.Serial);
+                var lens = firstCamera.ActiveLens;
+                if (firstCamera.IsMultiLens)
+                {
+                    _expandedLenses.Add(LensKey(firstCamera, lens));
+                }
+
+                var firstDate = lens.Dates.FirstOrDefault();
+                if (firstDate is not null)
+                {
+                    _selectedDateKey = DateKey(firstCamera, lens, firstDate);
+                    _expandedDates.Add(_selectedDateKey);
+                }
             }
 
             RebuildRows();
@@ -432,6 +443,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     // --- browse tree ---------------------------------------------------------
 
+    private static string LensKey(CameraNode camera, LensNode lens) => $"{camera.Serial}|{lens.SourceToken}";
+
+    private static string DateKey(CameraNode camera, LensNode lens, DateNode date) =>
+        $"{camera.Serial}|{lens.SourceToken}|{date.Key}";
+
     private void RebuildRows()
     {
         var query = SearchText.Trim();
@@ -456,46 +472,32 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             var childRows = new List<BrowseRow>();
             if (camExpanded)
             {
-                foreach (var date in camera.Dates)
+                if (camera.IsMultiLens)
                 {
-                    var dateExpanded = _expandedDates.Contains(date.Key) || hasQuery;
-                    var clipRows = new List<ClipRow>();
-                    if (dateExpanded)
+                    // Camera → Lens → Date → Clip: each source is its own branch.
+                    foreach (var lens in camera.Lenses)
                     {
-                        foreach (var recording in date.Recordings)
+                        var lensExpanded = _expandedLenses.Contains(LensKey(camera, lens)) || hasQuery;
+                        var lensChildren = lensExpanded ? BuildDateClipRows(camera, lens, query, hasQuery, cameraMatches) : [];
+
+                        if (hasQuery && lensChildren.Count == 0 && !cameraMatches)
                         {
-                            var clip = new ClipRow(camera, date, recording, SelectClipCommand)
-                            {
-                                IsSelected = recording == Player.ActiveRecording,
-                            };
-                            if (hasQuery && !cameraMatches && !clip.TimeRange.Contains(query, StringComparison.OrdinalIgnoreCase)
-                                && !date.LongLabel.Contains(query, StringComparison.OrdinalIgnoreCase))
-                            {
-                                continue;
-                            }
-
-                            _clipRows[recording] = clip;
-                            if (clip.IsSelected)
-                            {
-                                _highlightedClip = clip;
-                            }
-
-                            clipRows.Add(clip);
+                            continue;
                         }
-                    }
 
-                    if (hasQuery && clipRows.Count == 0 && !cameraMatches
-                        && !date.LongLabel.Contains(query, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
+                        childRows.Add(new LensRow(camera, lens, SelectLensNodeCommand)
+                        {
+                            IsSelected = camera.Serial == _selectedCameraSerial && lens == camera.ActiveLens,
+                            IsExpanded = lensExpanded,
+                            Indent = new Thickness(20, 0, 0, 0),
+                        });
+                        childRows.AddRange(lensChildren);
                     }
-
-                    childRows.Add(new DateRow(camera, date, SelectDateCommand)
-                    {
-                        IsSelected = camera.Serial == _selectedCameraSerial && date.Key == _selectedDateKey,
-                        IsExpanded = dateExpanded,
-                    });
-                    childRows.AddRange(clipRows);
+                }
+                else
+                {
+                    // Single-sensor: dates directly under the camera.
+                    childRows.AddRange(BuildDateClipRows(camera, camera.Lenses[0], query, hasQuery, cameraMatches));
                 }
             }
 
@@ -510,6 +512,56 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 Rows.Add(row);
             }
         }
+    }
+
+    private List<BrowseRow> BuildDateClipRows(CameraNode camera, LensNode lens, string query, bool hasQuery, bool cameraMatches)
+    {
+        var rows = new List<BrowseRow>();
+        foreach (var date in lens.Dates)
+        {
+            var dateExpanded = _expandedDates.Contains(DateKey(camera, lens, date)) || hasQuery;
+            var clipRows = new List<ClipRow>();
+            if (dateExpanded)
+            {
+                foreach (var recording in date.Recordings)
+                {
+                    var clip = new ClipRow(camera, lens, date, recording, SelectClipCommand)
+                    {
+                        IsSelected = recording == Player.ActiveRecording,
+                        Indent = new Thickness(camera.IsMultiLens ? 60 : 40, 0, 0, 0),
+                    };
+                    if (hasQuery && !cameraMatches && !clip.TimeRange.Contains(query, StringComparison.OrdinalIgnoreCase)
+                        && !date.LongLabel.Contains(query, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    _clipRows[recording] = clip;
+                    if (clip.IsSelected)
+                    {
+                        _highlightedClip = clip;
+                    }
+
+                    clipRows.Add(clip);
+                }
+            }
+
+            if (hasQuery && clipRows.Count == 0 && !cameraMatches
+                && !date.LongLabel.Contains(query, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            rows.Add(new DateRow(camera, lens, date, SelectDateCommand)
+            {
+                IsSelected = camera.Serial == _selectedCameraSerial && DateKey(camera, lens, date) == _selectedDateKey,
+                IsExpanded = dateExpanded,
+                Indent = new Thickness(camera.IsMultiLens ? 40 : 20, 0, 0, 0),
+            });
+            rows.AddRange(clipRows);
+        }
+
+        return rows;
     }
 
     partial void OnSearchTextChanged(string value) => RebuildRows();
@@ -528,10 +580,25 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         await LoadCameraIntoPlayer(row.Node);
     }
 
+    /// <summary>Selecting a lens branch: switch the active lens and expand it.</summary>
+    [RelayCommand]
+    private async Task SelectLensNode(LensRow row)
+    {
+        var key = LensKey(row.Camera, row.Node);
+        if (!_expandedLenses.Remove(key))
+        {
+            _expandedLenses.Add(key);
+        }
+
+        _selectedCameraSerial = row.Camera.Serial;
+        await SwitchToLens(row.Camera, row.Node);
+        RebuildRows();
+    }
+
     [RelayCommand]
     private async Task SelectDate(DateRow row)
     {
-        var key = row.Node.Key;
+        var key = DateKey(row.Camera, row.Lens, row.Node);
         if (!_expandedDates.Remove(key))
         {
             _expandedDates.Add(key);
@@ -539,9 +606,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         _selectedCameraSerial = row.Camera.Serial;
         _selectedDateKey = key;
+        await SwitchToLens(row.Camera, row.Lens);
         RebuildRows();
 
-        await LoadCameraIntoPlayer(row.Camera);
         var first = row.Node.Recordings.FirstOrDefault();
         if (first is not null)
         {
@@ -553,9 +620,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private async Task SelectClip(ClipRow row)
     {
         _selectedCameraSerial = row.Camera.Serial;
-        _selectedDateKey = row.Date.Key;
-        await LoadCameraIntoPlayer(row.Camera);
+        _selectedDateKey = DateKey(row.Camera, row.Lens, row.Date);
+        await SwitchToLens(row.Camera, row.Lens);
+        RebuildRows();
         await Player.SeekToRecording(row.Recording);
+    }
+
+    /// <summary>Makes the given lens active on its camera and loads it, preserving nothing here
+    /// (callers seek afterwards). No-op if it is already the loaded lens.</summary>
+    private async Task SwitchToLens(CameraNode camera, LensNode lens)
+    {
+        if (_card is null)
+        {
+            return;
+        }
+
+        if (camera.ActiveLens == lens && _loadedCameraSerial == camera.Serial)
+        {
+            return;
+        }
+
+        camera.ActiveLensIndex = Math.Max(0, camera.Lenses.ToList().IndexOf(lens));
+        await LoadCameraIntoPlayer(camera, force: true);
     }
 
     /// <summary>Loads the camera's active lens into the player (no-op if already loaded).</summary>
@@ -621,6 +707,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             : $"{recordedCount} lenses recorded · viewed one at a time";
     }
 
+    /// <summary>Lens bar tab: switch viewpoint but keep the moment (same timestamp + play state).</summary>
     [RelayCommand]
     private async Task SelectLens(LensTab tab)
     {
@@ -630,13 +717,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Switch viewpoint but keep the moment: same timestamp, same play/pause state.
         var position = Player.CurrentSeconds;
         var wasPlaying = Player.IsPlaying;
 
-        camera.ActiveLensIndex = camera.Lenses.ToList().IndexOf(tab.Node);
+        _expandedLenses.Add(LensKey(camera, tab.Node)); // reveal it in the tree too
+        await SwitchToLens(camera, tab.Node);
         RebuildRows();
-        await LoadCameraIntoPlayer(camera, force: true);
         await Player.SeekToSeconds(position, autoPlay: wasPlaying);
     }
 

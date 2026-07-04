@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Windows.Input;
 using AxisSdReader.Core.Axis;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -135,6 +136,9 @@ public abstract partial class BrowseRow : ObservableObject
 
     [ObservableProperty]
     private bool _isExpanded;
+
+    /// <summary>Left indent for the tree depth (Camera 0, Lens 20, Date 20/40, Clip 40/60).</summary>
+    public Thickness Indent { get; init; }
 }
 
 public sealed partial class CameraRow : BrowseRow
@@ -154,9 +158,10 @@ public sealed partial class CameraRow : BrowseRow
     public string LensTag => $"{Node.Lenses.Count} lenses";
 }
 
-public sealed partial class DateRow : BrowseRow
+/// <summary>A lens (recording source) level in the tree, shown only for multi-sensor cameras.</summary>
+public sealed partial class LensRow : BrowseRow
 {
-    public DateRow(CameraNode camera, DateNode node, ICommand command)
+    public LensRow(CameraNode camera, LensNode node, ICommand command)
     {
         Camera = camera;
         Node = node;
@@ -164,6 +169,25 @@ public sealed partial class DateRow : BrowseRow
     }
 
     public CameraNode Camera { get; }
+    public LensNode Node { get; }
+    public ICommand Command { get; }
+    public string Label => Node.Label;                 // "Source 3"
+    public string Sub => Node.Resolution;              // "4K"
+    public string Badge => $"{Node.ClipCount} clip{(Node.ClipCount == 1 ? "" : "s")}";
+}
+
+public sealed partial class DateRow : BrowseRow
+{
+    public DateRow(CameraNode camera, LensNode lens, DateNode node, ICommand command)
+    {
+        Camera = camera;
+        Lens = lens;
+        Node = node;
+        Command = command;
+    }
+
+    public CameraNode Camera { get; }
+    public LensNode Lens { get; }
     public DateNode Node { get; }
     public ICommand Command { get; }
     public string Label => Node.LongLabel;
@@ -172,9 +196,10 @@ public sealed partial class DateRow : BrowseRow
 
 public sealed partial class ClipRow : BrowseRow
 {
-    public ClipRow(CameraNode camera, DateNode date, Recording recording, ICommand command)
+    public ClipRow(CameraNode camera, LensNode lens, DateNode date, Recording recording, ICommand command)
     {
         Camera = camera;
+        Lens = lens;
         Date = date;
         Recording = recording;
         Command = command;
@@ -182,6 +207,7 @@ public sealed partial class ClipRow : BrowseRow
     }
 
     public CameraNode Camera { get; }
+    public LensNode Lens { get; }
     public DateNode Date { get; }
     public Recording Recording { get; }
     public ICommand Command { get; }
