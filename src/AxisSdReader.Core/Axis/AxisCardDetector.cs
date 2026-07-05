@@ -8,6 +8,9 @@ namespace AxisSdReader.Core.Axis;
 /// <summary>Result of a quick, read-only probe of a physical disk for Axis camera content.</summary>
 public sealed record AxisCardProbeResult(int DiskNumber, bool IsExt4, string? VolumeLabel, bool HasAxisContent)
 {
+    /// <summary>The card is LUKS-encrypted; it needs a passphrase before its content can be read.</summary>
+    public bool IsEncrypted { get; init; }
+
     /// <summary>Strong indication this is an Axis camera SD card: an ext4 filesystem that
     /// either carries recognizable recording structures or the label Axis cameras write.</summary>
     public bool IsLikelyAxisCard =>
@@ -30,6 +33,12 @@ public static class AxisCardDetector
         {
             var raw = RawDiskStream.OpenPhysicalDrive(diskNumber);
             using var reader = CardReader.Open(raw, Ownership.Dispose);
+
+            if (reader.Status == CardOpenStatus.EncryptedNeedsPassphrase)
+            {
+                // Encrypted: we can't see the content without a passphrase, but flag it so the app can prompt.
+                return new AxisCardProbeResult(diskNumber, IsExt4: false, null, false) { IsEncrypted = true };
+            }
 
             if (reader.Status != CardOpenStatus.Ok || reader.FileSystem is not { } fs)
             {

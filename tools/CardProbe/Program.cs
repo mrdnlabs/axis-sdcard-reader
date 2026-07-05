@@ -1,7 +1,12 @@
 using System.Diagnostics;
+using System.Buffers.Binary;
+using System.Text;
 using AxisSdReader.Core;
 using AxisSdReader.Core.Disk;
 using AxisSdReader.Core.Ext4;
+using AxisSdReader.Core.Ext4.Luks;
+using DiscUtils.Ext;
+using DiscUtils.Streams;
 
 // CardProbe: diagnostic harness for validating raw ext4 SD card access.
 //
@@ -19,9 +24,164 @@ return args switch
     [] => ListDisks(),
     ["--disk", var n, .. var rest] when int.TryParse(n, out var disk) => ProbeDisk(disk, rest),
     ["--image", var path, .. var rest] => ProbeImage(path, rest),
+    ["--luks", var n] when int.TryParse(n, out var disk) => DumpLuks(RawDiskStream.OpenPhysicalDrive(disk)),
+    ["--luks-image", var path] => DumpLuks(File.OpenRead(path)),
+    ["--unlock", var n, var pass] when int.TryParse(n, out var disk) => Unlock(RawDiskStream.OpenPhysicalDrive(disk), pass),
+    ["--unlock-image", var path, var pass] => Unlock(File.OpenRead(path), pass),
     ["--mkv", var path] => ProbeMkv(path),
     _ => Usage(),
 };
+
+// Unlocks a LUKS-encrypted card with a passphrase and lists the decrypted ext4 root — an end-to-end
+// validation of the decryption chain. Read-only.
+static int Unlock(Stream deviceStream, string passphrase)
+{
+    using var raw = deviceStream;
+    using var disk = new DiscUtils.Raw.Disk(raw, Ownership.None);
+
+    long offset = 0, length = raw.Length;
+    if (disk.IsPartitioned && disk.Partitions is { Count: > 0 } table)
+    {
+        offset = table[0].FirstSector * disk.SectorSize;
+        length = (table[0].LastSector - table[0].FirstSector + 1) * disk.SectorSize;
+    }
+
+    var partition = new SubStream(disk.Content, offset, length);
+    var sw = Stopwatch.StartNew();
+    var result = LuksVolume.TryUnlock(partition, passphrase);
+    Console.WriteLine($"Unlock status: {result.Status}  ({sw.ElapsedMilliseconds} ms)");
+    if (result.Detail is not null)
+    {
+        Console.WriteLine($"  {result.Detail}");
+    }
+
+    if (result.Status != LuksUnlockStatus.Success || result.PlaintextStream is null)
+    {
+        return 1;
+    }
+
+    using var plaintext = result.PlaintextStream;
+    Console.WriteLine($"Decrypted payload: {plaintext.Length:N0} bytes");
+
+    // The decrypted payload IS the ext4 filesystem.
+    using var fs = new ExtFileSystem(plaintext);
+    Console.WriteLine($"ext4 volume label: '{fs.VolumeLabel}'");
+    Console.WriteLine("Root contents:");
+    foreach (var dir in fs.GetDirectories(@"\").OrderBy(d => d))
+    {
+        Console.WriteLine($"  {dir.TrimStart('\\')}/");
+    }
+
+    foreach (var file in fs.GetFiles(@"\").OrderBy(f => f))
+    {
+        Console.WriteLine($"  {file.TrimStart('\\')}  {fs.GetFileLength(file):N0} bytes");
+    }
+
+    return 0;
+}
+
+// Reads and describes the LUKS header on the first partition, to characterize an encrypted card
+// (version, cipher, mode, key-derivation). Read-only; dumps metadata only, never key material payloads.
+static int DumpLuks(Stream deviceStream)
+{
+    using var raw = deviceStream;
+    using var disk = new DiscUtils.Raw.Disk(raw, DiscUtils.Streams.Ownership.None);
+
+    long offset = 0;
+    if (disk.IsPartitioned && disk.Partitions is { Count: > 0 } table)
+    {
+        offset = table[0].FirstSector * disk.SectorSize;
+    }
+
+    Console.WriteLine($"First partition at byte offset {offset:N0}");
+
+    var head = ReadAt(raw, offset, 4096);
+    var magic = head.AsSpan(0, 6).ToArray();
+    Console.WriteLine($"Magic: {Convert.ToHexString(magic)} ('{PrintableAscii(magic)}')");
+    if (!magic.AsSpan().SequenceEqual(new byte[] { 0x4C, 0x55, 0x4B, 0x53, 0xBA, 0xBE }))
+    {
+        Console.WriteLine("Not a LUKS volume (no LUKS magic at partition start).");
+        return 1;
+    }
+
+    var version = BinaryPrimitives.ReadUInt16BigEndian(head.AsSpan(6, 2));
+    Console.WriteLine($"LUKS version: {version}");
+
+    if (version == 1)
+    {
+        Console.WriteLine($"  cipher-name : {AsciiZ(head, 8, 32)}");
+        Console.WriteLine($"  cipher-mode : {AsciiZ(head, 40, 32)}");
+        Console.WriteLine($"  hash-spec   : {AsciiZ(head, 72, 32)}");
+        Console.WriteLine($"  payload-off : {BinaryPrimitives.ReadUInt32BigEndian(head.AsSpan(104, 4))} sectors");
+        Console.WriteLine($"  key-bytes   : {BinaryPrimitives.ReadUInt32BigEndian(head.AsSpan(108, 4))}");
+        Console.WriteLine($"  mk-iter     : {BinaryPrimitives.ReadUInt32BigEndian(head.AsSpan(164, 4))}");
+        Console.WriteLine($"  uuid        : {AsciiZ(head, 168, 40)}");
+        for (var i = 0; i < 8; i++)
+        {
+            var b = 208 + i * 48;
+            var active = BinaryPrimitives.ReadUInt32BigEndian(head.AsSpan(b, 4));
+            if (active != 0x00AC71F3)
+            {
+                continue; // LUKS_KEY_ENABLED marker
+            }
+
+            var iter = BinaryPrimitives.ReadUInt32BigEndian(head.AsSpan(b + 4, 4));
+            var kmOff = BinaryPrimitives.ReadUInt32BigEndian(head.AsSpan(b + 40, 4));
+            var stripes = BinaryPrimitives.ReadUInt32BigEndian(head.AsSpan(b + 44, 4));
+            Console.WriteLine($"  keyslot {i}  : ENABLED  iterations={iter}  km-offset={kmOff} sectors  stripes={stripes}");
+        }
+    }
+    else if (version == 2)
+    {
+        var hdrSize = BinaryPrimitives.ReadUInt64BigEndian(head.AsSpan(8, 8));
+        Console.WriteLine($"  hdr-size    : {hdrSize:N0} bytes");
+        Console.WriteLine($"  label       : {AsciiZ(head, 24, 48)}");
+        Console.WriteLine($"  checksum-alg: {AsciiZ(head, 72, 32)}");
+        Console.WriteLine($"  uuid        : {AsciiZ(head, 168, 40)}");
+        Console.WriteLine($"  subsystem   : {AsciiZ(head, 208, 48)}");
+
+        var jsonLen = (int)Math.Min(Math.Max(0, (long)hdrSize - 4096), 256 * 1024);
+        var json = ReadAt(raw, offset + 4096, jsonLen);
+        var text = Encoding.UTF8.GetString(json).TrimEnd('\0');
+        Console.WriteLine();
+        Console.WriteLine("--- LUKS2 JSON metadata ---");
+        Console.WriteLine(text);
+    }
+
+    Console.WriteLine();
+    Console.WriteLine("First 256 bytes:");
+    Console.WriteLine(Convert.ToHexString(head.AsSpan(0, 256)));
+    return 0;
+}
+
+static byte[] ReadAt(Stream s, long offset, int count)
+{
+    s.Position = offset;
+    var buf = new byte[count];
+    var total = 0;
+    while (total < count)
+    {
+        var n = s.Read(buf, total, count - total);
+        if (n == 0)
+        {
+            break;
+        }
+
+        total += n;
+    }
+
+    return buf;
+}
+
+static string AsciiZ(byte[] b, int offset, int len)
+{
+    var span = b.AsSpan(offset, len);
+    var end = span.IndexOf((byte)0);
+    return Encoding.ASCII.GetString(span[..(end < 0 ? span.Length : end)]);
+}
+
+static string PrintableAscii(byte[] b) =>
+    string.Concat(b.Select(c => c is >= 0x20 and < 0x7F ? (char)c : '.'));
 
 static int ProbeMkv(string path)
 {
@@ -45,6 +205,8 @@ static int ProbeMkv(string path)
 static int Usage()
 {
     Console.WriteLine("usage: CardProbe [--disk N [--no-guard] | --image path.img] [--tree [depth]] [--dump src dst]...");
+    Console.WriteLine("       CardProbe --luks N            describe the LUKS encryption header on disk N (elevated)");
+    Console.WriteLine("       CardProbe --unlock N <pass>   unlock a LUKS card with a passphrase and list ext4 root (elevated)");
     return 2;
 }
 

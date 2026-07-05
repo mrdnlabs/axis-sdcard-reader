@@ -79,6 +79,11 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isMuted;
 
+    /// <summary>True while a seek is taking long enough to be worth showing a loading indicator
+    /// (the first seek into a recording loads and decrypts its chunk metadata).</summary>
+    [ObservableProperty]
+    private bool _isSeeking;
+
     [ObservableProperty]
     private string _cameraName = "";
 
@@ -303,60 +308,94 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         var version = ++_seekVersion;
         var play = autoPlay ?? IsPlaying;
 
-        var segIndex = Array.FindIndex(_segments, s => s.Contains(seconds));
-        if (segIndex < 0)
+        // Show a loading indicator only if this seek is still running after a short grace period, so quick
+        // in-chunk seeks don't flicker it but the first (metadata-loading) seek into a recording does.
+        var seekDone = false;
+        ShowSeekingIfSlow(version, () => seekDone);
+        try
         {
-            StopPlayback();
-            CurrentSeconds = seconds;
-            HasFootage = false;
-            _activeSegment = -1;
-            ActiveRecordingChanged?.Invoke(null);
+            var segIndex = Array.FindIndex(_segments, s => s.Contains(seconds));
+            if (segIndex < 0)
+            {
+                StopPlayback();
+                CurrentSeconds = seconds;
+                HasFootage = false;
+                _activeSegment = -1;
+                ActiveRecordingChanged?.Invoke(null);
+                return;
+            }
+
+            var segment = _segments[segIndex];
+
+            // First entry into this recording: load exact chunk metadata (a few small reads),
+            // which can shift the estimated end. Re-resolve afterwards.
+            if (!segment.IsRefined && _card is not null)
+            {
+                try
+                {
+                    await _card.LoadMetadataAsync(segment.Recording);
+                }
+                catch (OperationCanceledException)
+                {
+                    return; // the card was closed/removed while metadata was loading — nothing to do
+                }
+
+                if (version != _seekVersion)
+                {
+                    return; // a newer seek superseded this one while metadata loaded
+                }
+
+                segment.Refine();
+                RebuildTimelineSegments();
+                UpdateSegCountLabel();
+
+                if (!segment.Contains(seconds))
+                {
+                    seconds = Math.Clamp(seconds, segment.StartSeconds, Math.Max(segment.StartSeconds, segment.EndSeconds - 0.5));
+                }
+            }
+
+            // Fast path: staying inside the currently open chunk just moves the playback time.
+            if (segIndex == _activeSegment && MediaPlayer is not null && _currentMedia is not null)
+            {
+                var (chunkIndex, offset) = segment.Locate(seconds);
+                if (chunkIndex == _activeChunk)
+                {
+                    CurrentSeconds = seconds;
+                    MediaPlayer.Time = (long)offset.TotalMilliseconds;
+                    return;
+                }
+            }
+
+            StartAt(segIndex, seconds, play);
+        }
+        finally
+        {
+            seekDone = true;
+            if (version == _seekVersion)
+            {
+                IsSeeking = false;
+            }
+        }
+    }
+
+    /// <summary>Turns on <see cref="IsSeeking"/> only if the current seek is still running after a short
+    /// delay (and hasn't been superseded), so brief seeks never flash the indicator.</summary>
+    private async void ShowSeekingIfSlow(int version, Func<bool> done)
+    {
+        try
+        {
+            await Task.Delay(160);
+        }
+        catch
+        {
             return;
         }
 
-        var segment = _segments[segIndex];
-
-        // First entry into this recording: load exact chunk metadata (a few small reads),
-        // which can shift the estimated end. Re-resolve afterwards.
-        if (!segment.IsRefined && _card is not null)
+        if (!_disposed && version == _seekVersion && !done())
         {
-            try
-            {
-                await _card.LoadMetadataAsync(segment.Recording);
-            }
-            catch (OperationCanceledException)
-            {
-                return; // the card was closed/removed while metadata was loading — nothing to do
-            }
-
-            if (version != _seekVersion)
-            {
-                return; // a newer seek superseded this one while metadata loaded
-            }
-
-            segment.Refine();
-            RebuildTimelineSegments();
-            UpdateSegCountLabel();
-
-            if (!segment.Contains(seconds))
-            {
-                seconds = Math.Clamp(seconds, segment.StartSeconds, Math.Max(segment.StartSeconds, segment.EndSeconds - 0.5));
-            }
+            IsSeeking = true;
         }
-
-        // Fast path: staying inside the currently open chunk just moves the playback time.
-        if (segIndex == _activeSegment && MediaPlayer is not null && _currentMedia is not null)
-        {
-            var (chunkIndex, offset) = segment.Locate(seconds);
-            if (chunkIndex == _activeChunk)
-            {
-                CurrentSeconds = seconds;
-                MediaPlayer.Time = (long)offset.TotalMilliseconds;
-                return;
-            }
-        }
-
-        StartAt(segIndex, seconds, play);
     }
 
     [RelayCommand]
@@ -643,6 +682,7 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         DisposeCurrentMedia();
         _activeChunk = -1;
         IsPlaying = false;
+        IsSeeking = false;
     }
 
     /// <summary>

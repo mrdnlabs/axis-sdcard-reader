@@ -18,6 +18,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly DeviceWatcher _watcher;
 
     private OpenCard? _card;
+    private bool _openInProgress; // guards against device-change re-entrancy during an open/passphrase flow
+    private bool _exporting;      // an export is actively reading the card; defer card teardown until it ends
+    private bool _cardRemovedDuringExport;
+    private CancellationTokenSource? _exportCts; // cancels the in-flight export when the card is torn down
     private IReadOnlyList<CameraNode> _cameras = [];
     private readonly Dictionary<Recording, ClipRow> _clipRows = [];
     private ClipRow? _highlightedClip;
@@ -26,7 +30,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowWaiting))]
+    [NotifyPropertyChangedFor(nameof(ShowVideoSurface))]
     private bool _isCardOpen;
+
+    /// <summary>
+    /// Whether the LibVLC video surface should be shown. It is a Win32 HWND that always draws on top of
+    /// WPF (airspace), so it must be hidden whenever a WPF overlay needs to appear above it (the export
+    /// dialog or the boot splash) — otherwise the video punches through them.
+    /// </summary>
+    public bool ShowVideoSurface => IsCardOpen && Player.HasFootage && !ShowExport && !BootVisible;
 
     [ObservableProperty]
     private bool _isBusy;
@@ -103,6 +115,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     // --- boot / splash overlay --------------------------------------------------
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowVideoSurface))]
     private bool _bootVisible;
 
     [ObservableProperty]
@@ -127,38 +140,33 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isDarkTheme = true;
 
-    [ObservableProperty]
-    private string _accentName = "Trust Blue";
-
     [RelayCommand]
     private void ToggleTheme()
     {
         IsDarkTheme = !IsDarkTheme;
-        Theme.Apply(IsDarkTheme, AccentName);
-    }
-
-    [RelayCommand]
-    private void SetAccent(string name)
-    {
-        AccentName = name;
-        Theme.Apply(IsDarkTheme, name);
+        Theme.Apply(IsDarkTheme);
     }
 
     // --- export dialog -------------------------------------------------------
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowVideoSurface))]
     private bool _showExport;
 
     [ObservableProperty]
     private string _exportFormat = "mp4";
 
-    [ObservableProperty]
-    private bool _includeStamp = true;
-
     public MainViewModel()
     {
         _dispatcher = Dispatcher.CurrentDispatcher;
         Player.ActiveRecordingChanged += OnActiveRecordingChanged;
+        Player.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(Player.HasFootage))
+            {
+                OnPropertyChanged(nameof(ShowVideoSurface));
+            }
+        };
 
         _watcher = new DeviceWatcher();
         _watcher.DiskArrived += path => _dispatcher.BeginInvoke(() => { _ = OnDeviceArrived(); });
@@ -170,12 +178,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public async Task OpenImageFileAsync(string path) =>
-        await OpenCardAsync(() => OpenCard.FromImage(path), $"Opening {Path.GetFileName(path)}…");
+    public Task OpenImageFileAsync(string path) =>
+        OpenWithPassphraseFlowAsync(pass => OpenCard.FromImage(path, pass),
+            $"Opening {Path.GetFileName(path)}…", Path.GetFileName(path));
 
     private async Task OnDeviceArrived()
     {
-        if (!IsCardOpen && !IsBusy)
+        // _openInProgress also blocks re-entry while a modal passphrase dialog is up: its nested message
+        // loop pumps device-change events, and during the prompt IsBusy is false, so this guard is what
+        // stops a second open flow / stacked dialog / disposed-card race.
+        if (!_openInProgress && !IsCardOpen && !IsBusy)
         {
             await ScanAndOpenAsync();
         }
@@ -194,11 +206,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         var stillPresent = await Task.Run(() =>
             DiskEnumerator.GetPhysicalDisks().Any(d => d.DiskNumber == diskNumber && d.SizeBytes > 0));
 
-        if (!stillPresent)
+        if (stillPresent)
         {
-            CloseCardInternal();
-            WaitingMessage = "The card was removed. Insert an Axis camera SD card to begin.";
+            return;
         }
+
+        if (_exporting)
+        {
+            // An export is actively reading the card; don't dispose its streams out from under the running
+            // FFmpeg read. DoExport closes the card once the export unwinds.
+            _cardRemovedDuringExport = true;
+            return;
+        }
+
+        CloseCardInternal();
+        WaitingMessage = "The card was removed. Insert an Axis camera SD card to begin.";
     }
 
     [RelayCommand]
@@ -221,23 +243,32 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         SetBootStage("Detecting SD card…", 0.08, "scanning USB readers");
         try
         {
-            var card = await Task.Run(() => DiskEnumerator.GetPhysicalDisks()
-                .Where(d => d.IsUsb && d.SizeBytes > 0)
-                .Select(d => (Disk: d, Probe: AxisCardDetector.Probe(d.DiskNumber)))
-                .FirstOrDefault(x => x.Probe.IsLikelyAxisCard));
+            // Prefer a readable Axis card; fall back to an encrypted card (which we can unlock after a
+            // passphrase prompt).
+            var picked = await Task.Run(() =>
+            {
+                var found = DiskEnumerator.GetPhysicalDisks()
+                    .Where(d => d.IsUsb && d.SizeBytes > 0)
+                    .Select(d => (Disk: d, Probe: AxisCardDetector.Probe(d.DiskNumber)))
+                    .ToList();
+                var plain = found.FirstOrDefault(x => x.Probe.IsLikelyAxisCard);
+                return plain.Disk is not null ? plain : found.FirstOrDefault(x => x.Probe.IsEncrypted);
+            });
 
-            if (card.Disk is null)
+            if (picked.Disk is null)
             {
                 WaitingMessage = "No Axis camera card detected.\nInsert a card, or open a card image.";
                 BootVisible = false;
                 return;
             }
 
-            SetBootStage("Detecting SD card…", 0.15, $"{card.Disk.FriendlyName} · ext4");
+            var disk = picked.Disk;
+            SetBootStage("Detecting SD card…", 0.15,
+                $"{disk.FriendlyName} · {(picked.Probe.IsEncrypted ? "encrypted" : "ext4")}");
 
-            await OpenCardAsync(
-                () => OpenCard.FromDevice(card.Disk.DiskNumber, card.Disk.FriendlyName, card.Disk.SizeBytes),
-                "Opening card…");
+            await OpenWithPassphraseFlowAsync(
+                pass => OpenCard.FromDevice(disk.DiskNumber, disk.FriendlyName, disk.SizeBytes, pass),
+                "Opening card…", disk.FriendlyName);
         }
         finally
         {
@@ -263,7 +294,55 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task OpenCardAsync(Func<OpenCard> open, string busyText)
+    /// <summary>
+    /// Opens a card, prompting for a passphrase and retrying if it turns out to be LUKS-encrypted.
+    /// <paramref name="factory"/> builds an <see cref="OpenCard"/> from an optional passphrase.
+    /// </summary>
+    private async Task OpenWithPassphraseFlowAsync(Func<string?, OpenCard> factory, string busyText, string cardName)
+    {
+        _openInProgress = true;
+        try
+        {
+            var status = await OpenCardAsync(() => factory(null), busyText);
+            if (status != CardOpenStatus.EncryptedNeedsPassphrase)
+            {
+                return; // opened, or failed for a non-passphrase reason (already surfaced)
+            }
+
+            BootVisible = false;
+            IsBusy = false;
+            BusyText = "";
+
+            string? error = null;
+            while (true)
+            {
+                var passphrase = PassphraseDialog.Prompt(System.Windows.Application.Current.MainWindow, cardName, error);
+                if (string.IsNullOrEmpty(passphrase))
+                {
+                    WaitingMessage = "This card is encrypted. Enter the SD card passphrase to unlock it.";
+                    return;
+                }
+
+                var retry = await OpenCardAsync(() => factory(passphrase), "Unlocking card…");
+                if (retry == CardOpenStatus.IncorrectPassphrase)
+                {
+                    error = "That passphrase didn't unlock the card. Try again.";
+                    BootVisible = false;
+                    IsBusy = false;
+                    BusyText = "";
+                    continue;
+                }
+
+                return; // unlocked, or a different terminal failure (already surfaced)
+            }
+        }
+        finally
+        {
+            _openInProgress = false;
+        }
+    }
+
+    private async Task<CardOpenStatus?> OpenCardAsync(Func<OpenCard> open, string busyText)
     {
         CloseCardInternal();
         IsBusy = true;
@@ -275,16 +354,24 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             var card = await Task.Run(open);
             if (card.Status != CardOpenStatus.Ok)
             {
-                var message = card.Status switch
-                {
-                    CardOpenStatus.Encrypted => "This card is encrypted by the camera and cannot be read here.",
-                    CardOpenStatus.IncompatibleExt4 => $"The card's filesystem uses unsupported features:\n{card.FailureDetail}",
-                    _ => card.FailureDetail ?? "No readable Axis recordings were found on this card.",
-                };
+                var status = card.Status;
+                var detail = card.FailureDetail;
                 card.Dispose();
-                WaitingMessage = message;
+
+                // The passphrase flow handles these — leave the UI for it to drive.
+                if (status is CardOpenStatus.EncryptedNeedsPassphrase or CardOpenStatus.IncorrectPassphrase)
+                {
+                    return status;
+                }
+
+                WaitingMessage = status switch
+                {
+                    CardOpenStatus.Encrypted => detail ?? "This card is encrypted in a format this app can't read.",
+                    CardOpenStatus.IncompatibleExt4 => $"The card's filesystem uses unsupported features:\n{detail}",
+                    _ => detail ?? "No readable Axis recordings were found on this card.",
+                };
                 BootVisible = false;
-                return;
+                return status;
             }
 
             _card = card;
@@ -344,11 +431,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
 
             BootVisible = false;
+            return CardOpenStatus.Ok;
+        }
+        catch (OperationCanceledException)
+        {
+            // The card was closed/removed while opening/indexing; the teardown path drives the UI message.
+            BootVisible = false;
+            return null;
         }
         catch (Exception ex)
         {
             WaitingMessage = ex.Message;
             BootVisible = false;
+            return null;
         }
         finally
         {
@@ -461,25 +556,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var label = card.VolumeLabel is { Length: > 0 } vl ? vl : "Axis";
+        var fsDesc = card.IsEncrypted ? "encrypted ext4" : "ext4";
 
         // Reflect the ACTUAL protection outcome, never a hardcoded reassurance. An image file needs no
         // protection; a physical card is "protected" only when every volume was locked.
         IsCardProtected = !card.IsPhysicalDevice || card.FullyProtected;
         if (!card.IsPhysicalDevice)
         {
-            MountLabel = $"Image · ext4 · {label} volume";
-            ProtectionHeadline = "Read-only image";
+            MountLabel = $"Image · {fsDesc} · {label} volume";
+            ProtectionHeadline = card.IsEncrypted ? "Decrypted read-only image" : "Read-only image";
             ProtectionDetail = "Opened from a file — the source is never modified.";
         }
         else if (card.FullyProtected)
         {
-            MountLabel = $"Locked read-only · ext4 · {label} volume";
-            ProtectionHeadline = "Card locked · Read-only";
-            ProtectionDetail = "Footage cannot be changed or deleted.";
+            MountLabel = $"Locked read-only · {fsDesc} · {label} volume";
+            ProtectionHeadline = card.IsEncrypted ? "Unlocked · Read-only" : "Card locked · Read-only";
+            ProtectionDetail = card.IsEncrypted
+                ? "Decrypted in memory with your passphrase; the card is never modified."
+                : "Footage cannot be changed or deleted.";
         }
         else
         {
-            MountLabel = $"NOT fully locked · ext4 · {label} volume";
+            MountLabel = $"NOT fully locked · {fsDesc} · {label} volume";
             ProtectionHeadline = "Card not fully locked";
             ProtectionDetail = "Windows still has access — do not click any \"format disk\" prompt.";
         }
@@ -818,9 +916,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void SetExportFormat(string format) => ExportFormat = format;
 
-    [RelayCommand]
-    private void ToggleStamp() => IncludeStamp = !IncludeStamp;
-
     /// <summary>True when FFmpeg is available; MP4 export and trimming require it.</summary>
     public bool FfmpegAvailable { get; } = Core.Export.FfmpegExporter.IsAvailable;
 
@@ -832,20 +927,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var container = ExportFormat switch
-        {
-            "mp4" => Core.Export.ExportContainer.Mp4,
-            "mkv" => Core.Export.ExportContainer.Mkv,
-            _ => (Core.Export.ExportContainer?)null,
-        };
-
-        if (container is null)
-        {
-            MessageBox.Show(
-                "ASF export isn't available. Choose MP4 (plays almost anywhere) or MKV (original streams).",
-                "Format not supported", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
+        var container = ExportFormat == "mkv"
+            ? Core.Export.ExportContainer.Mkv
+            : Core.Export.ExportContainer.Mp4;
 
         if (!FfmpegAvailable)
         {
@@ -856,86 +940,106 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        BusyText = "Preparing export…";
-        IsBusy = true;
-        IReadOnlyList<ExportSlice> slices;
+        // _exporting makes OnDeviceRemoved DEFER card teardown while the export is reading the card, so the
+        // shared device/decrypt streams are never disposed out from under an in-flight FFmpeg read. If the
+        // card is pulled mid-export, we close it cleanly here once the export has unwound.
+        _exporting = true;
         try
         {
-            slices = await Player.BuildExportSlices();
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-
-        if (slices.Count == 0)
-        {
-            MessageBox.Show("The selected range contains no recordings.", "Nothing to export",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
-        var dialog = new OpenFolderDialog { Title = "Choose export destination" };
-        if (dialog.ShowDialog() != true)
-        {
-            return;
-        }
-
-        ShowExport = false;
-        IsBusy = true;
-
-        // Export reads card chunks under the exclusive I/O lock; stop playback first so the VLC demux
-        // thread isn't reading the shared device stream (and doesn't stall behind the whole export).
-        Player.SuspendForExclusiveIo();
-
-        var burnNote = IncludeStamp
-            ? "\n\nNote: timestamp burn-in needs re-encoding and isn't applied to a lossless export; " +
-              "Axis footage already carries a burned-in timestamp."
-            : "";
-        try
-        {
-            var fs = _card.FileSystem!;
-            var extension = container == Core.Export.ExportContainer.Mp4 ? "mp4" : "mkv";
-            var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            long totalBytes = 0;
-            var index = 0;
-
-            foreach (var slice in slices)
+            BusyText = "Preparing export…";
+            IsBusy = true;
+            IReadOnlyList<ExportSlice> slices;
+            try
             {
-                index++;
-                var baseName = $"{slice.WallClockStart:yyyy-MM-dd_HH-mm-ss}_{SanitizeForFileName(Player.CameraName)}";
-                // Never silently overwrite: disambiguate against files produced earlier in this run and
-                // any pre-existing files in the destination.
-                var outputPath = UniqueOutputPath(dialog.FolderName, baseName, extension, usedPaths);
-
-                var progress = new Progress<Core.Export.FfmpegProgress>(p =>
-                    BusyText = slices.Count > 1
-                        ? $"Exporting clip {index}/{slices.Count} · {p.Phase} {p.Fraction:P0}"
-                        : $"Exporting · {p.Phase} {p.Fraction:P0}");
-
-                // Runs on the card's exclusive I/O queue: chunk reads + ffmpeg are serialized
-                // against playback so the shared device stream is never touched concurrently.
-                var result = await _card.RunExclusiveAsync(ct =>
-                    Core.Export.FfmpegExporter.ExportAsync(
-                        fs, slice.Chunks, slice.TrimStart, slice.TrimEnd, container.Value, outputPath, progress, ct));
-                totalBytes += result.Bytes;
+                slices = await Player.BuildExportSlices();
+            }
+            finally
+            {
+                IsBusy = false;
             }
 
-            MessageBox.Show(
-                $"Exported {slices.Count} clip{(slices.Count == 1 ? "" : "s")} " +
-                $"({totalBytes / (1024.0 * 1024):F0} MB, {extension.ToUpperInvariant()}) to:\n{dialog.FolderName}\n\n" +
-                "Trimmed to your marked range and stream-copied (no quality loss). The card was not modified." +
-                burnNote,
-                "Export complete", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(ex.Message, "Export failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (slices.Count == 0)
+            {
+                MessageBox.Show("The selected range contains no recordings.", "Nothing to export",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var dialog = new OpenFolderDialog { Title = "Choose export destination" };
+            if (dialog.ShowDialog() != true)
+            {
+                return;
+            }
+
+            if (_card is null || _cardRemovedDuringExport)
+            {
+                return; // the card was removed while the folder dialog was open
+            }
+
+            ShowExport = false;
+            IsBusy = true;
+
+            // Export reads card chunks under the exclusive I/O lock; stop playback first so the VLC demux
+            // thread isn't reading the shared device stream (and doesn't stall behind the whole export).
+            Player.SuspendForExclusiveIo();
+            _exportCts = new CancellationTokenSource();
+
+            try
+            {
+                var fs = _card.FileSystem!;
+                var extension = container == Core.Export.ExportContainer.Mp4 ? "mp4" : "mkv";
+                var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                long totalBytes = 0;
+                var index = 0;
+
+                foreach (var slice in slices)
+                {
+                    index++;
+                    var baseName = $"{slice.WallClockStart:yyyy-MM-dd_HH-mm-ss}_{SanitizeForFileName(Player.CameraName)}";
+                    // Never silently overwrite: disambiguate against files produced earlier in this run and
+                    // any pre-existing files in the destination.
+                    var outputPath = UniqueOutputPath(dialog.FolderName, baseName, extension, usedPaths);
+
+                    var progress = new Progress<Core.Export.FfmpegProgress>(p =>
+                        BusyText = slices.Count > 1
+                            ? $"Exporting clip {index}/{slices.Count} · {p.Phase} {p.Fraction:P0}"
+                            : $"Exporting · {p.Phase} {p.Fraction:P0}");
+
+                    // Runs on the card's exclusive I/O queue: chunk reads + ffmpeg are serialized
+                    // against playback so the shared device stream is never touched concurrently. The token
+                    // lets card teardown cancel the read (and kill ffmpeg) so it can dispose safely.
+                    var result = await _card.RunExclusiveAsync(ct =>
+                        Core.Export.FfmpegExporter.ExportAsync(
+                            fs, slice.Chunks, slice.TrimStart, slice.TrimEnd, container, outputPath, progress, ct),
+                        _exportCts.Token);
+                    totalBytes += result.Bytes;
+                }
+
+                MessageBox.Show(
+                    $"Exported {slices.Count} clip{(slices.Count == 1 ? "" : "s")} ({totalBytes / (1024.0 * 1024):F0} MB) to:\n{dialog.FolderName}",
+                    "Export complete", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Export failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsBusy = false;
+                BusyText = "";
+            }
         }
         finally
         {
-            IsBusy = false;
-            BusyText = "";
+            _exporting = false;
+            _exportCts?.Dispose();
+            _exportCts = null;
+            if (_cardRemovedDuringExport)
+            {
+                _cardRemovedDuringExport = false;
+                CloseCardInternal();
+                WaitingMessage = "The card was removed. Insert an Axis camera SD card to begin.";
+            }
         }
     }
 
@@ -944,10 +1048,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     private void CloseCardInternal()
     {
-        // Detach the player FIRST: this halts VLC's demux thread and disposes the current chunk stream
-        // while the card's I/O lock and device stream are still valid, and forgets the card so no later
-        // seek/callback dereferences it. Disposing the card out from under a live demux read would be a
-        // use-after-dispose on the shared stream. Reached on card pull, Close, and re-open — all mid-play.
+        // Cancel any in-flight export first so its FFmpeg read releases the card's I/O lock promptly; the
+        // card's Dispose then waits briefly on that lock before tearing down the shared streams. This makes
+        // teardown safe on EVERY path (window close, shutdown, Close) — not just device removal.
+        _exportCts?.Cancel();
+
+        // Detach the player: this halts VLC's demux thread and disposes the current chunk stream while the
+        // card's I/O lock and device stream are still valid, and forgets the card so no later seek/callback
+        // dereferences it. Disposing the card out from under a live read would be a use-after-dispose on the
+        // shared stream. Reached on card pull, Close, and re-open — all mid-play.
         Player.DetachCard();
         Player.ClearSelection();
         Rows.Clear();
