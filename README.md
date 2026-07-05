@@ -18,26 +18,41 @@ This app:
   guarantees no writes on that handle);
 - indexes recordings from Axis's on-card layout
   (`YYYYMMDD_HHMMSS_xxxx_<cameraMAC>` directories of MKV chunks);
+- unlocks **encrypted** cards (LUKS) with the camera's passphrase and reads them
+  the same read-only way (see *Encrypted cards* below);
 - plays them in-app (H.264/H.265 via LibVLC — no paid Windows HEVC codec
   needed) and exports them to local folders.
 
 ## Status
 
-Feature-complete against card images; awaiting validation on real Axis cards.
+Validated on real Axis cards (plain **and** LUKS-encrypted); ext4 and decryption
+paths both proven against hardware.
 
 - [x] Phase 1 — ext4 reading (image-based) with tests
 - [x] Phase 2 — raw device access + volume protection + CardProbe harness
 - [x] Phase 3 — Axis recording model (sessions, MKV metadata)
 - [x] Phase 4 — WPF UI: browse + play (chunk-spanning timeline, speed control)
 - [x] Phase 5 — export with progress and verification
-- [ ] Validation against real Axis-written SD cards (`CardProbe --disk N`)
+- [x] Encrypted-card support — LUKS1 unlock (read-only) with a passphrase prompt
+- [x] Validation against real Axis-written SD cards (`CardProbe --disk N`)
 - [ ] Installer/packaging
+
+## Encrypted cards
+
+Newer Axis firmware can encrypt the SD card (System → Storage). Encrypted cards
+are **LUKS** containers (dm-crypt, `aes-xts-plain64`) wrapping the same ext4
+filesystem. When the app detects one it prompts for the camera's SD-card
+passphrase, derives the key (PBKDF2), and decrypts sectors **in memory** as it
+reads — the card is still never written, and the passphrase is never stored.
+Only **LUKS1** is supported today; a LUKS2 card is detected and reported as an
+unsupported format (Argon2id support is future work). The crypto uses .NET's
+built-in AES/PBKDF2 (AES-XTS layered on AES) — no external crypto dependency.
 
 ## Trying it without hardware
 
 ```
-dotnet run --project tools\CardProbe -- --image tests\fixtures\axis-card-v2.img
-dotnet build src\AxisSdReader.App -p:DevManifest=true && src\AxisSdReader.App\bin\Debug\net8.0-windows\AxisSdReader.App.exe tests\fixtures\axis-card-v2.img
+dotnet run --project tools\CardProbe -- --image tests\fixtures\axis-card-v4.img
+dotnet build src\AxisSdReader.App -p:DevManifest=true && src\AxisSdReader.App\bin\Debug\net8.0-windows\AxisSdReader.App.exe tests\fixtures\axis-card-v4.img
 ```
 
 (The fixture image is generated on first `dotnet test` run via WSL.)
@@ -84,3 +99,4 @@ build; a true re-encode-to-H.264 path and timestamp burn-in are future work.)
 | ext4 (read-only) | [LTRData.DiscUtils](https://github.com/LTRData/DiscUtils) | MIT |
 | Video playback | [LibVLCSharp](https://code.videolan.org/videolan/LibVLCSharp) | LGPL 2.1 |
 | Trimmed export | [FFmpeg](https://ffmpeg.org) (`ffmpeg.exe`, external) | LGPL 2.1+ build |
+| LUKS decryption | .NET `System.Security.Cryptography` (built-in) | — |

@@ -4,10 +4,10 @@ using System.Windows.Media;
 namespace AxisSdReader.App;
 
 /// <summary>
-/// The design's token-based theming system: two themes (Dark default, Light) and four accent
-/// schemes (default Trust Blue). Tokens are published as brushes/colors in application
-/// resources under "T.*" keys; all UI consumes them via DynamicResource. Everything except
-/// the video surface re-themes. Custom-drawn controls listen to <see cref="Changed"/>.
+/// The design's token-based theming system: two themes (Dark default, Light) with a fixed Trust Blue
+/// accent. Tokens are published as brushes/colors in application resources under "T.*" keys; all UI
+/// consumes them via DynamicResource. Everything except the video surface re-themes. Custom-drawn
+/// controls listen to <see cref="Changed"/>.
 /// </summary>
 public static class Theme
 {
@@ -15,24 +15,14 @@ public static class Theme
 
     public static bool IsDark { get; private set; } = true;
 
-    public static string Accent { get; private set; } = "Trust Blue";
-
-    public static readonly string[] AccentSchemes = ["Trust Blue", "Secure Teal", "Signal Violet", "Amber Alert"];
-
     private sealed record AccentDef(string A, string Hover, string InkDark, string InkLight);
 
-    private static readonly Dictionary<string, AccentDef> Accents = new()
-    {
-        ["Trust Blue"] = new AccentDef("#3b82f6", "#2f6fed", "#8bb4ff", "#1a4fc0"),
-        ["Secure Teal"] = new AccentDef("#14b8a6", "#0d9488", "#5eded0", "#0f766e"),
-        ["Signal Violet"] = new AccentDef("#8b5cf6", "#7c3aed", "#c3a8ff", "#6d28d9"),
-        ["Amber Alert"] = new AccentDef("#f59e0b", "#d97706", "#fbc45a", "#b45309"),
-    };
+    // Fixed accent (Trust Blue).
+    private static readonly AccentDef TheAccent = new("#3b82f6", "#2f6fed", "#8bb4ff", "#1a4fc0");
 
-    public static void Apply(bool dark, string accent)
+    public static void Apply(bool dark)
     {
         IsDark = dark;
-        Accent = Accents.ContainsKey(accent) ? accent : "Trust Blue";
         var r = System.Windows.Application.Current.Resources;
 
         // --- neutrals: token → (dark, light) ---------------------------------
@@ -72,7 +62,7 @@ public static class Theme
         Set(r, "TrustBorder", dark ? "#522fbf7a" : "#bfe4cf");
 
         // --- accent -----------------------------------------------------------
-        var a = Accents[Accent];
+        var a = TheAccent;
         var accentColor = (Color)ColorConverter.ConvertFromString(a.A);
         Set(r, "Accent", a.A);
         Set(r, "AccentH", a.Hover);
@@ -82,9 +72,8 @@ public static class Theme
         SetAlpha(r, "AccentHalo", accentColor, dark ? 0.30 : 0.22);
         r["T.AccentColor"] = accentColor; // for drop shadows
 
-        // Export-range/mark color: fixed yellow, except cyan under Amber Alert so it
-        // never collides with the accent.
-        var sel = Accent == "Amber Alert" ? "#22d3ee" : "#f7c948";
+        // Export-range/mark color: a fixed yellow that never collides with the blue accent.
+        var sel = "#f7c948";
         var selColor = (Color)ColorConverter.ConvertFromString(sel);
         Set(r, "Sel", sel);
         SetAlpha(r, "SelFill", selColor, 0.30);

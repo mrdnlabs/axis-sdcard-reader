@@ -14,7 +14,7 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
-        Theme.Apply(dark: true, accent: "Trust Blue");
+        Theme.Apply(dark: true);
 
         // Defense in depth: never let a stray exception silently vanish the window. UI-thread
         // exceptions are shown and swallowed so the session survives; background-thread and

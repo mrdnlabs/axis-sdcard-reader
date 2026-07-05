@@ -37,7 +37,8 @@ public sealed class SdCardSession : IDisposable
     /// <summary>Opens a protected session on the given physical disk.</summary>
     /// <param name="diskNumber">The physical disk number (see <see cref="DiskEnumerator"/>).</param>
     /// <param name="guardVolumes">Lock/dismount volumes and remove drive letters first. Disable only for diagnostics.</param>
-    public static SdCardSession Open(int diskNumber, bool guardVolumes = true)
+    /// <param name="passphrase">Passphrase to unlock a LUKS-encrypted card, or null for an unencrypted card.</param>
+    public static SdCardSession Open(int diskNumber, bool guardVolumes = true, string? passphrase = null)
     {
         VolumeGuard? guard = null;
         RawDiskStream? raw = null;
@@ -54,7 +55,7 @@ public sealed class SdCardSession : IDisposable
             // and every uncached read is a sector-aligned DeviceIoControl round trip.
             var cached = new BlockCacheStream(SparseStream.FromStream(raw, Ownership.Dispose), Ownership.Dispose);
 
-            var reader = CardReader.Open(cached, Ownership.Dispose);
+            var reader = CardReader.Open(cached, Ownership.Dispose, passphrase);
             return new SdCardSession(guard, reader);
         }
         catch

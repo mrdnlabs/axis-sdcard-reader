@@ -186,7 +186,9 @@ public static class AxisCardIndexer
     /// </summary>
     /// <param name="fileSystem">The card's filesystem.</param>
     /// <param name="progress">Invoked with the running recording count as discovery proceeds.</param>
-    public static AxisCard Index(DiscFileSystem fileSystem, Action<int>? progress = null)
+    /// <param name="cancellationToken">Cancels a long walk (e.g. when the card is closed mid-index).</param>
+    public static AxisCard Index(DiscFileSystem fileSystem, Action<int>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         var recordings = new List<Recording>();
         var unrecognized = new List<string>();
@@ -194,6 +196,7 @@ public static class AxisCardIndexer
 
         foreach (var directory in fileSystem.GetDirectories(@"\"))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var name = DirName(directory);
             if (name is "lost+found")
             {
@@ -216,6 +219,7 @@ public static class AxisCardIndexer
 
                     foreach (var recordingDir in fileSystem.GetDirectories(hourDir))
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         if (RecordingId.TryParse(DirName(recordingDir)) is { } id)
                         {
                             recordings.Add(BuildRecording(fileSystem, id, recordingDir));

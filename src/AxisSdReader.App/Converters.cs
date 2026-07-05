@@ -42,13 +42,3 @@ public sealed class StringEqualsConverter : IValueConverter
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();
 }
-
-/// <summary>True when the bound string equals the ConverterParameter (accent scheme dots).</summary>
-public sealed class AccentActiveConverter : IValueConverter
-{
-    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        string.Equals(value?.ToString(), parameter?.ToString(), StringComparison.Ordinal);
-
-    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        throw new NotSupportedException();
-}

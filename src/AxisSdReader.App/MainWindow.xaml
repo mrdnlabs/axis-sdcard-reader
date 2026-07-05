@@ -666,7 +666,7 @@
                             <Grid>
                                 <vlc:VideoView x:Name="VideoView" MediaPlayer="{Binding Player.MediaPlayer}"
                                                Background="Black"
-                                               Visibility="{Binding Player.HasFootage, Converter={StaticResource BoolToVis}}" />
+                                               Visibility="{Binding ShowVideoSurface, Converter={StaticResource BoolToVis}}" />
                                 <!-- Gap state (colors fixed: the video area is always dark) -->
                                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
                                             Visibility="{Binding Player.NoFootage, Converter={StaticResource BoolToVis}}">
@@ -825,12 +825,59 @@
                                     </Button>
                                 </StackPanel>
 
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="16,0,0,0">
-                                    <TextBlock Text="{Binding Player.ClockString}" FontFamily="{StaticResource MonoFont}"
-                                               FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource T.Text}" />
-                                    <TextBlock FontSize="11" Foreground="{DynamicResource T.Muted2}">
-                                        <Run Text="of " /><Run Text="{Binding Player.PositionDateShort, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Player.StatusLabel, Mode=OneWay}" />
-                                    </TextBlock>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Player.ClockString}" FontFamily="{StaticResource MonoFont}"
+                                                   FontSize="20" FontWeight="SemiBold" Foreground="{DynamicResource T.Text}" />
+                                        <TextBlock FontSize="11" Foreground="{DynamicResource T.Muted2}">
+                                            <Run Text="of " /><Run Text="{Binding Player.PositionDateShort, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Player.StatusLabel, Mode=OneWay}" />
+                                        </TextBlock>
+                                    </StackPanel>
+
+                                    <!-- Loading indicator during a slow seek (metadata load / decrypt). -->
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+                                        <StackPanel.Style>
+                                            <Style TargetType="StackPanel">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Player.IsSeeking}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </StackPanel.Style>
+                                        <Grid Width="16" Height="16" VerticalAlignment="Center">
+                                            <Ellipse Width="16" Height="16" Stroke="{DynamicResource T.Border2}" StrokeThickness="2" />
+                                            <Ellipse Width="16" Height="16" Stroke="{DynamicResource T.Accent}" StrokeThickness="2"
+                                                     StrokeDashArray="8 100" StrokeDashCap="Round" RenderTransformOrigin="0.5,0.5">
+                                                <Ellipse.RenderTransform>
+                                                    <RotateTransform Angle="0" />
+                                                </Ellipse.RenderTransform>
+                                                <Ellipse.Style>
+                                                    <Style TargetType="Ellipse">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Player.IsSeeking}" Value="True">
+                                                                <DataTrigger.EnterActions>
+                                                                    <BeginStoryboard x:Name="SeekSpinStory">
+                                                                        <Storyboard>
+                                                                            <DoubleAnimation
+                                                                                Storyboard.TargetProperty="(UIElement.RenderTransform).(RotateTransform.Angle)"
+                                                                                From="0" To="360" Duration="0:0:0.85" RepeatBehavior="Forever" />
+                                                                        </Storyboard>
+                                                                    </BeginStoryboard>
+                                                                </DataTrigger.EnterActions>
+                                                                <DataTrigger.ExitActions>
+                                                                    <StopStoryboard BeginStoryboardName="SeekSpinStory" />
+                                                                </DataTrigger.ExitActions>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Ellipse.Style>
+                                            </Ellipse>
+                                        </Grid>
+                                        <TextBlock Text="Loading…" FontSize="12" Foreground="{DynamicResource T.Muted2}"
+                                                   VerticalAlignment="Center" Margin="8,0,0,0" />
+                                    </StackPanel>
                                 </StackPanel>
 
                                 <!-- speed -->
@@ -956,7 +1003,7 @@
                     <TextBlock Text="{Binding MountLabel}" FontSize="11" Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
                 </StackPanel>
 
-                <!-- Theme + accent switcher -->
+                <!-- Theme switcher -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
                     <Button Command="{Binding ToggleThemeCommand}" Cursor="Hand" ToolTip="Toggle dark / light theme"
                             Background="Transparent" BorderThickness="0" Padding="4,0">
@@ -975,72 +1022,6 @@
                             </ControlTemplate>
                         </Button.Template>
                     </Button>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
-                        <StackPanel.Resources>
-                            <Style TargetType="Button" x:Key="AccentDot">
-                                <Setter Property="Width" Value="17" />
-                                <Setter Property="Height" Value="17" />
-                                <Setter Property="Margin" Value="3,0" />
-                                <Setter Property="Cursor" Value="Hand" />
-                                <Setter Property="Command" Value="{Binding SetAccentCommand}" />
-                                <Setter Property="BorderBrush" Value="Transparent" />
-                                <Setter Property="Template">
-                                    <Setter.Value>
-                                        <ControlTemplate TargetType="Button">
-                                            <Grid>
-                                                <Ellipse Stroke="{TemplateBinding BorderBrush}" StrokeThickness="1.5" />
-                                                <Ellipse Fill="{TemplateBinding Background}" Margin="4" />
-                                            </Grid>
-                                        </ControlTemplate>
-                                    </Setter.Value>
-                                </Setter>
-                            </Style>
-                        </StackPanel.Resources>
-                        <Button Background="#3B82F6" CommandParameter="Trust Blue" ToolTip="Trust Blue">
-                            <Button.Style>
-                                <Style TargetType="Button" BasedOn="{StaticResource AccentDot}">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding AccentName}" Value="Trust Blue">
-                                            <Setter Property="BorderBrush" Value="{DynamicResource T.Muted2}" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Button.Style>
-                        </Button>
-                        <Button Background="#14B8A6" CommandParameter="Secure Teal" ToolTip="Secure Teal">
-                            <Button.Style>
-                                <Style TargetType="Button" BasedOn="{StaticResource AccentDot}">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding AccentName}" Value="Secure Teal">
-                                            <Setter Property="BorderBrush" Value="{DynamicResource T.Muted2}" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Button.Style>
-                        </Button>
-                        <Button Background="#8B5CF6" CommandParameter="Signal Violet" ToolTip="Signal Violet">
-                            <Button.Style>
-                                <Style TargetType="Button" BasedOn="{StaticResource AccentDot}">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding AccentName}" Value="Signal Violet">
-                                            <Setter Property="BorderBrush" Value="{DynamicResource T.Muted2}" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Button.Style>
-                        </Button>
-                        <Button Background="#F59E0B" CommandParameter="Amber Alert" ToolTip="Amber Alert">
-                            <Button.Style>
-                                <Style TargetType="Button" BasedOn="{StaticResource AccentDot}">
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding AccentName}" Value="Amber Alert">
-                                            <Setter Property="BorderBrush" Value="{DynamicResource T.Muted2}" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Button.Style>
-                        </Button>
-                    </StackPanel>
                 </StackPanel>
 
                 <TextBlock DockPanel.Dock="Right" Text="Index complete" FontSize="11" Foreground="{DynamicResource T.Muted}"
@@ -1103,7 +1084,7 @@
                             </Grid>
 
                             <TextBlock Text="FORMAT" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource T.Muted}" Margin="0,0,0,8" />
-                            <UniformGrid Columns="3" Margin="0,0,0,16">
+                            <UniformGrid Columns="2" Margin="0,0,0,16">
                                 <Button Cursor="Hand" Margin="0,0,8,0" Command="{Binding SetExportFormatCommand}" CommandParameter="mp4">
                                     <Button.Template>
                                         <ControlTemplate TargetType="Button">
@@ -1124,7 +1105,7 @@
                                         </ControlTemplate>
                                     </Button.Template>
                                 </Button>
-                                <Button Cursor="Hand" Margin="0,0,8,0" Command="{Binding SetExportFormatCommand}" CommandParameter="mkv">
+                                <Button Cursor="Hand" Command="{Binding SetExportFormatCommand}" CommandParameter="mkv">
                                     <Button.Template>
                                         <ControlTemplate TargetType="Button">
                                             <Border x:Name="B" CornerRadius="9" Background="{DynamicResource T.Subtle}"
@@ -1144,41 +1125,10 @@
                                         </ControlTemplate>
                                     </Button.Template>
                                 </Button>
-                                <Border CornerRadius="9" Background="{DynamicResource T.Subtle}"
-                                        BorderBrush="{DynamicResource T.Hair}" BorderThickness="1.5" Padding="13,11" Opacity="0.5"
-                                        ToolTip="ASF is a legacy container with no modern-codec support — not offered.">
-                                    <StackPanel>
-                                        <TextBlock Text="ASF" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource T.Muted2}" />
-                                        <TextBlock Text="unavailable" FontSize="11" Foreground="{DynamicResource T.Muted3}" Margin="0,2,0,0" />
-                                    </StackPanel>
-                                </Border>
                             </UniformGrid>
 
-                            <Button Command="{Binding ToggleStampCommand}" HorizontalAlignment="Left" Cursor="Hand">
-                                <Button.Template>
-                                    <ControlTemplate TargetType="Button">
-                                        <StackPanel Orientation="Horizontal" Background="Transparent">
-                                            <Border x:Name="Box" Width="19" Height="19" CornerRadius="5" BorderThickness="1.5"
-                                                    BorderBrush="{DynamicResource T.Border2}" Background="Transparent" Margin="0,0,10,0">
-                                                <TextBlock x:Name="Check" Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" FontSize="11"
-                                                           Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" />
-                                            </Border>
-                                            <TextBlock Text="Burn timestamp &amp; camera name into exported video" FontSize="13"
-                                                       Foreground="{DynamicResource T.Text2}" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                        <ControlTemplate.Triggers>
-                                            <DataTrigger Binding="{Binding IncludeStamp}" Value="True">
-                                                <Setter TargetName="Box" Property="Background" Value="{DynamicResource T.Accent}" />
-                                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource T.Accent}" />
-                                                <Setter TargetName="Check" Property="Visibility" Value="Visible" />
-                                            </DataTrigger>
-                                        </ControlTemplate.Triggers>
-                                    </ControlTemplate>
-                                </Button.Template>
-                            </Button>
-
                             <Border Background="{DynamicResource T.TrustBg}" BorderBrush="{DynamicResource T.TrustBorder}"
-                                    BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,16,0,0">
+                                    BorderThickness="1" CornerRadius="8" Padding="12,10">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="{DynamicResource T.Trust}"
                                                VerticalAlignment="Center" Margin="0,0,9,0" />

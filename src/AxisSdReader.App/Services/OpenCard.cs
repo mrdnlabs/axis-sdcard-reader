@@ -16,6 +16,7 @@ public sealed class OpenCard : IDisposable
     private readonly SdCardSession? _session;   // physical device (owns reader + guard)
     private readonly CardReader _reader;        // image files: owned directly
     private readonly SemaphoreSlim _ioLock = new(1, 1);
+    private readonly CancellationTokenSource _teardownCts = new(); // cancels long ops (index) on dispose
     private volatile bool _disposed;
 
     private OpenCard(SdCardSession? session, CardReader reader, string description, bool isPhysicalDevice,
@@ -57,20 +58,24 @@ public sealed class OpenCard : IDisposable
     /// </summary>
     public bool FullyProtected => _session?.FullyProtected ?? true;
 
+    /// <summary>True when the card was LUKS-encrypted and had to be unlocked with a passphrase to read.</summary>
+    public bool IsEncrypted => _reader.IsEncrypted;
+
     public AxisCard? Index { get; private set; }
 
-    public static OpenCard FromDevice(int diskNumber, string description, long? capacityBytes = null)
+    public static OpenCard FromDevice(int diskNumber, string description, long? capacityBytes = null,
+        string? passphrase = null)
     {
-        var session = SdCardSession.Open(diskNumber);
+        var session = SdCardSession.Open(diskNumber, passphrase: passphrase);
         return new OpenCard(session, session.Card, description, isPhysicalDevice: true, capacityBytes)
         {
             DiskNumber = diskNumber,
         };
     }
 
-    public static OpenCard FromImage(string imagePath)
+    public static OpenCard FromImage(string imagePath, string? passphrase = null)
     {
-        var reader = CardReader.OpenImage(imagePath);
+        var reader = CardReader.OpenImage(imagePath, passphrase);
         long? size = null;
         try
         {
@@ -160,7 +165,9 @@ public sealed class OpenCard : IDisposable
     public async Task<AxisCard> IndexAsync(Action<int>? progress = null)
     {
         var fs = FileSystem ?? throw new InvalidOperationException("No filesystem is open.");
-        Index = await RunExclusive(() => AxisCardIndexer.Index(fs, progress));
+        // Observe the teardown token so closing the card mid-index unwinds the walk promptly and frees the
+        // I/O lock, letting Dispose acquire it before tearing down the shared stream.
+        Index = await RunExclusive(() => AxisCardIndexer.Index(fs, progress, _teardownCts.Token));
         return Index;
     }
 
@@ -215,20 +222,49 @@ public sealed class OpenCard : IDisposable
     public void Dispose()
     {
         // Mark disposed FIRST so any RunExclusive/OpenChunk caller that races this teardown cancels cleanly
-        // rather than throwing ObjectDisposedException off the disposed lock. Callers must still have
-        // quiesced active reads (the app stops playback before closing the card).
+        // rather than throwing ObjectDisposedException off the disposed lock.
         _disposed = true;
 
-        if (_session is not null)
+        // Cancel a long in-flight index so it unwinds and frees the I/O lock promptly (the export is
+        // cancelled by the caller; this covers the non-cancellable-looking index path).
+        _teardownCts.Cancel();
+
+        // Then serialize teardown BEHIND any in-flight exclusive I/O (indexing / metadata / a running
+        // export), so the shared, non-thread-safe DiscUtils/decrypt streams are never disposed out from
+        // under an active read — on ANY teardown path (card removal, window close, shutdown). Callers
+        // cancel long operations (export) first, so this wait is normally instant; it is bounded so a stuck
+        // operation cannot hang shutdown forever.
+        var entered = false;
+        try
         {
-            _session.Dispose(); // disposes reader + releases volume locks
+            entered = _ioLock.Wait(TimeSpan.FromSeconds(20));
         }
-        else
+        catch (ObjectDisposedException)
         {
-            _reader.Dispose();
         }
 
-        _ioLock.Dispose();
+        try
+        {
+            if (_session is not null)
+            {
+                _session.Dispose(); // disposes reader + releases volume locks
+            }
+            else
+            {
+                _reader.Dispose();
+            }
+        }
+        finally
+        {
+            if (entered)
+            {
+                try { _ioLock.Release(); }
+                catch (ObjectDisposedException) { }
+            }
+
+            _ioLock.Dispose();
+            _teardownCts.Dispose();
+        }
     }
 }
 

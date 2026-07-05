@@ -5,3 +5,9 @@ obj/
 tests/fixtures/*.img
 build/
 
+
+# Local diagnostics that may contain real card crypto material / passphrases — never commit
+luks-dump.txt
+unlock-result.txt
+run-*.ps1
+*-dump.txt
