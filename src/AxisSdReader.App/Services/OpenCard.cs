@@ -64,7 +64,7 @@ public sealed class OpenCard : IDisposable
     public AxisCard? Index { get; private set; }
 
     public static OpenCard FromDevice(int diskNumber, string description, long? capacityBytes = null,
-        string? passphrase = null)
+        char[]? passphrase = null)
     {
         var session = SdCardSession.Open(diskNumber, passphrase: passphrase);
         return new OpenCard(session, session.Card, description, isPhysicalDevice: true, capacityBytes)
@@ -73,7 +73,7 @@ public sealed class OpenCard : IDisposable
         };
     }
 
-    public static OpenCard FromImage(string imagePath, string? passphrase = null)
+    public static OpenCard FromImage(string imagePath, char[]? passphrase = null)
     {
         var reader = CardReader.OpenImage(imagePath, passphrase);
         long? size = null;

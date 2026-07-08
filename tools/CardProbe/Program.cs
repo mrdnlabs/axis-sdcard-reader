@@ -48,7 +48,7 @@ static int Unlock(Stream deviceStream, string passphrase)
 
     var partition = new SubStream(disk.Content, offset, length);
     var sw = Stopwatch.StartNew();
-    var result = LuksVolume.TryUnlock(partition, passphrase);
+    var result = LuksVolume.TryUnlock(partition, passphrase.ToCharArray());
     Console.WriteLine($"Unlock status: {result.Status}  ({sw.ElapsedMilliseconds} ms)");
     if (result.Detail is not null)
     {

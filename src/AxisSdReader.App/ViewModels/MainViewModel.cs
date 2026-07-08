@@ -298,7 +298,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Opens a card, prompting for a passphrase and retrying if it turns out to be LUKS-encrypted.
     /// <paramref name="factory"/> builds an <see cref="OpenCard"/> from an optional passphrase.
     /// </summary>
-    private async Task OpenWithPassphraseFlowAsync(Func<string?, OpenCard> factory, string busyText, string cardName)
+    private async Task OpenWithPassphraseFlowAsync(Func<char[]?, OpenCard> factory, string busyText, string cardName)
     {
         _openInProgress = true;
         try
@@ -317,13 +317,24 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             while (true)
             {
                 var passphrase = PassphraseDialog.Prompt(System.Windows.Application.Current.MainWindow, cardName, error);
-                if (string.IsNullOrEmpty(passphrase))
+                if (passphrase is null || passphrase.Length == 0)
                 {
                     WaitingMessage = "This card is encrypted. Enter the SD card passphrase to unlock it.";
                     return;
                 }
 
-                var retry = await OpenCardAsync(() => factory(passphrase), "Unlocking card…");
+                CardOpenStatus? retry;
+                try
+                {
+                    retry = await OpenCardAsync(() => factory(passphrase), "Unlocking card…");
+                }
+                finally
+                {
+                    // Zero our copy of the secret as soon as the unlock attempt is done. (WPF's PasswordBox
+                    // keeps an internal string we cannot clear, so in-memory wiping is best-effort.)
+                    Array.Clear(passphrase);
+                }
+
                 if (retry == CardOpenStatus.IncorrectPassphrase)
                 {
                     error = "That passphrase didn't unlock the card. Try again.";
@@ -542,10 +553,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         if (index.Recordings.Count > 0)
         {
-            // Span covers recording ENDS too: an overnight recording extends the last day.
+            // Span covers recording ENDS too: an overnight recording extends the last day. SafeEnd
+            // saturates the date math so one crafted/corrupt recording can't overflow DateTime and abort
+            // the entire card open (the per-clip labels use the same helper).
             var first = index.Recordings.Min(r => LocalDate(r));
             var last = index.Recordings
-                .Max(r => LocalStart(r).Add(TimeSegment.EstimateDuration(r)).Date);
+                .Max(r => TimeSegment.SafeEnd(LocalStart(r), TimeSegment.EstimateDuration(r)).Date);
             FootageSpanLabel = first == last
                 ? first.ToString("MMM d, yyyy")
                 : $"{first:MMM d} – {last:MMM d, yyyy}";
@@ -934,8 +947,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (!FfmpegAvailable)
         {
             MessageBox.Show(
-                "FFmpeg was not found, so trimmed export is unavailable. Install ffmpeg.exe (on the PATH " +
-                "or in an 'ffmpeg' folder next to the app) and try again.",
+                "FFmpeg was not found, so trimmed export is unavailable. Place ffmpeg.exe in an 'ffmpeg' " +
+                "folder next to the app and try again. (When running as administrator, the PATH is not " +
+                "searched, for security.)",
                 "FFmpeg required", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }

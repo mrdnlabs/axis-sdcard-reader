@@ -35,7 +35,7 @@ paths both proven against hardware.
 - [x] Phase 5 — export with progress and verification
 - [x] Encrypted-card support — LUKS1 unlock (read-only) with a passphrase prompt
 - [x] Validation against real Axis-written SD cards (`CardProbe --disk N`)
-- [ ] Installer/packaging
+- [x] Packaging — self-contained win-x64 zip via `tools\publish.ps1`; CI runs build + tests
 
 ## Encrypted cards
 
@@ -85,12 +85,35 @@ lossless. The app locates `ffmpeg.exe` in this order:
 
 1. an `ffmpeg` folder next to the app executable,
 2. next to the app executable directly,
-3. on the system `PATH`.
+3. on the system `PATH` — **only when not running elevated** (see below).
 
-For distribution, bundle an **LGPL** FFmpeg build in the `ffmpeg` folder. If
-FFmpeg is missing, the app disables trimmed export and says so. (MP4 keeps the
-original codec — H.264/H.265/AV1 — so very old players may still need a modern
-build; a true re-encode-to-H.264 path and timestamp burn-in are future work.)
+Because the app runs as administrator, it deliberately does **not** search the
+`PATH` for `ffmpeg.exe`: a `PATH` directory writable by a standard user could let
+that user plant a binary that then executes with administrator rights. Place
+`ffmpeg.exe` in an `ffmpeg` folder next to the app (a location a standard user
+can't write when the app is installed under `Program Files`). If FFmpeg is
+missing, the app disables trimmed export and says so. (MP4 keeps the original
+codec — H.264/H.265/AV1 — so very old players may still need a modern build; a
+true re-encode-to-H.264 path and timestamp burn-in are future work.)
+
+## Installing & verifying your download
+
+The released `AxisSdReader-vX.Y.Z-win-x64.zip` is **self-contained** — no .NET
+runtime install is needed. Extract it and run `AxisSdReader.App.exe` (accept the
+UAC prompt; raw disk access requires administrator rights). Install it under a
+location standard users can't write to (e.g. `Program Files`).
+
+The executable is **not code-signed**, so on first run expect:
+
+- a SmartScreen *"Windows protected your PC"* notice → **More info → Run anyway**;
+- a UAC prompt showing **Publisher: Unknown**.
+
+To verify integrity out-of-band, compare the release's published **SHA-256**
+against your download:
+
+```
+Get-FileHash .\AxisSdReader-vX.Y.Z-win-x64.zip -Algorithm SHA256
+```
 
 ## Key dependencies
 
@@ -100,3 +123,11 @@ build; a true re-encode-to-H.264 path and timestamp burn-in are future work.)
 | Video playback | [LibVLCSharp](https://code.videolan.org/videolan/LibVLCSharp) | LGPL 2.1 |
 | Trimmed export | [FFmpeg](https://ffmpeg.org) (`ffmpeg.exe`, external) | LGPL 2.1+ build |
 | LUKS decryption | .NET `System.Security.Cryptography` (built-in) | — |
+
+## License
+
+This project is licensed under the **MIT License** — see [LICENSE](LICENSE).
+Third-party components it uses or bundles (libVLC / LibVLCSharp under LGPL-2.1,
+DiscUtils and CommunityToolkit.Mvvm under MIT) are attributed in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), which is also included in the
+release package.

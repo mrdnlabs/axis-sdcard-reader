@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Security.Principal;
 using System.Text;
 using AxisSdReader.Core.Axis;
 using DiscUtils;
@@ -30,7 +31,8 @@ public sealed record FfmpegExportResult(string OutputPath, long Bytes, TimeSpan 
 /// </summary>
 public static class FfmpegExporter
 {
-    /// <summary>Locates <c>ffmpeg.exe</c>: an "ffmpeg" folder beside the app, the app dir, then PATH.</summary>
+    /// <summary>Locates <c>ffmpeg.exe</c>: an "ffmpeg" folder beside the app, then the app dir. Falls back
+    /// to PATH only when NOT running elevated (see below).</summary>
     public static string? FindFfmpeg()
     {
         var baseDir = AppContext.BaseDirectory;
@@ -45,6 +47,14 @@ public static class FfmpegExporter
             {
                 return candidate;
             }
+        }
+
+        // When running elevated, do NOT fall back to %PATH%: a standard user could plant a malicious
+        // ffmpeg.exe on a writable PATH directory that would then execute with administrator rights. An
+        // elevated build trusts only an ffmpeg co-located with the app (installed to a protected folder).
+        if (IsElevated())
+        {
+            return null;
         }
 
         var pathVar = Environment.GetEnvironmentVariable("PATH") ?? "";
@@ -67,7 +77,44 @@ public static class FfmpegExporter
         return null;
     }
 
+    /// <summary>True when the current process is running with administrator rights.</summary>
+    private static bool IsElevated()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static bool IsAvailable => FindFfmpeg() is not null;
+
+    /// <summary>Best-effort removal of leftover export temp folders from a previous run that was killed
+    /// mid-export (power loss / crash), so multi-GB chunk copies don't accumulate in %TEMP%. Safe to call
+    /// once at startup, before any export begins.</summary>
+    public static void SweepStaleTempDirs()
+    {
+        try
+        {
+            foreach (var dir in Directory.EnumerateDirectories(Path.GetTempPath(), "axis-export-*"))
+            {
+                TryDeleteDir(dir);
+            }
+        }
+        catch
+        {
+            // best effort — the temp dir may be inaccessible; nothing depends on this succeeding
+        }
+    }
 
     /// <summary>
     /// Exports the given chunks (already narrowed to those overlapping the range and in order),
@@ -91,7 +138,8 @@ public static class FfmpegExporter
 
         var ffmpeg = FindFfmpeg()
             ?? throw new FileNotFoundException(
-                "FFmpeg was not found. Place ffmpeg.exe next to the app (in an 'ffmpeg' folder) or on the PATH.");
+                "FFmpeg was not found. Place ffmpeg.exe in an 'ffmpeg' folder next to the app. " +
+                "(When running as administrator, the PATH is not searched, for security.)");
 
         var duration = trimEnd - trimStart;
         var tempDir = Path.Combine(Path.GetTempPath(), "axis-export-" + Guid.NewGuid().ToString("N"));
@@ -238,6 +286,17 @@ public static class FfmpegExporter
         catch (OperationCanceledException)
         {
             TryKill(process);
+            // Kill is asynchronous on Windows; wait for the process to actually exit so it releases its
+            // handles to the temp input files before the caller's finally deletes the temp folder.
+            try
+            {
+                await process.WaitForExitAsync(CancellationToken.None);
+            }
+            catch
+            {
+                // best effort — we are already unwinding a cancellation
+            }
+
             throw;
         }
 
@@ -286,16 +345,27 @@ public static class FfmpegExporter
 
     private static void TryDeleteDir(string dir)
     {
-        try
+        // Retry briefly: a just-killed ffmpeg can still hold input-file handles for a short window (Windows
+        // releases them asynchronously), so the first Delete may hit a sharing violation.
+        for (var attempt = 0; ; attempt++)
         {
-            if (Directory.Exists(dir))
+            try
             {
-                Directory.Delete(dir, recursive: true);
+                if (Directory.Exists(dir))
+                {
+                    Directory.Delete(dir, recursive: true);
+                }
+
+                return;
             }
-        }
-        catch
-        {
-            // best effort
+            catch when (attempt < 4)
+            {
+                Thread.Sleep(100);
+            }
+            catch
+            {
+                return; // give up after retries — best effort
+            }
         }
     }
 }

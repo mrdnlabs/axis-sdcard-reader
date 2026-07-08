@@ -26,7 +26,7 @@ public class LuksTests
     {
         var (image, plaintext) = BuildLuks1Image(Passphrase);
 
-        var result = LuksVolume.TryUnlock(new MemoryStream(image), Passphrase);
+        var result = LuksVolume.TryUnlock(new MemoryStream(image), Passphrase.ToCharArray());
 
         Assert.Equal(LuksUnlockStatus.Success, result.Status);
         Assert.NotNull(result.PlaintextStream);
@@ -51,7 +51,7 @@ public class LuksTests
     {
         var (image, _) = BuildLuks1Image(Passphrase);
 
-        var result = LuksVolume.TryUnlock(new MemoryStream(image), "not-the-passphrase");
+        var result = LuksVolume.TryUnlock(new MemoryStream(image), "not-the-passphrase".ToCharArray());
 
         Assert.Equal(LuksUnlockStatus.WrongPassphrase, result.Status);
         Assert.Null(result.PlaintextStream);
@@ -60,7 +60,7 @@ public class LuksTests
     [Fact]
     public void ReportsNotLuksForPlainData()
     {
-        var result = LuksVolume.TryUnlock(new MemoryStream(new byte[4096]), Passphrase);
+        var result = LuksVolume.TryUnlock(new MemoryStream(new byte[4096]), Passphrase.ToCharArray());
         Assert.Equal(LuksUnlockStatus.NotLuks, result.Status);
     }
 
@@ -90,7 +90,7 @@ public class LuksTests
         var (image, _) = BuildLuks1Image(Passphrase);
         value.CopyTo(image, offset);
 
-        var result = LuksVolume.TryUnlock(new MemoryStream(image), Passphrase);
+        var result = LuksVolume.TryUnlock(new MemoryStream(image), Passphrase.ToCharArray());
 
         Assert.NotEqual(LuksUnlockStatus.Success, result.Status);
         Assert.Null(result.PlaintextStream);

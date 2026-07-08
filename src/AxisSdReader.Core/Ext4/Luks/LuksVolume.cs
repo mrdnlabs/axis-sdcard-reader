@@ -54,11 +54,11 @@ public static class LuksVolume
 
     /// <summary>
     /// Attempts to unlock the LUKS volume at the start of <paramref name="partitionStream"/> with
-    /// <paramref name="passphrase"/>. On success returns a read-only plaintext stream over the payload
-    /// (the ext4 filesystem). The returned stream reads through <paramref name="partitionStream"/>, so
-    /// keep that alive until the plaintext stream is disposed.
+    /// <paramref name="passphrase"/> (a char[] so the caller can zero it after use). On success returns a
+    /// read-only plaintext stream over the payload (the ext4 filesystem). The returned stream reads through
+    /// <paramref name="partitionStream"/>, so keep that alive until the plaintext stream is disposed.
     /// </summary>
-    public static LuksUnlockResult TryUnlock(Stream partitionStream, string passphrase)
+    public static LuksUnlockResult TryUnlock(Stream partitionStream, char[] passphrase)
     {
         byte[] header;
         try
@@ -101,7 +101,7 @@ public static class LuksVolume
         }
 
         var hashName = HashName(hdr.HashSpec);
-        var passwordBytes = Encoding.UTF8.GetBytes(passphrase);
+        var passwordBytes = Encoding.UTF8.GetBytes(passphrase); // UTF-8 bytes of the passphrase chars
         try
         {
             foreach (var slot in hdr.Keyslots)

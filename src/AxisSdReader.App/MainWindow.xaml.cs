@@ -18,6 +18,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = new MainViewModel();
         DataContext = _viewModel;
+        Title = $"Axis SD Card Reader  ·  v{App.Version}"; // shown in the taskbar / Alt-Tab
 
         Timeline.Scrubbing += seconds => _viewModel.Player.ScrubPreview(seconds);
         Timeline.ScrubCommitted += seconds => _viewModel.Player.ScrubCommit(seconds);

@@ -27,8 +27,13 @@ public sealed record RecordingBlockXml(
 {
     public bool IsComplete => string.Equals(Status, "Complete", StringComparison.OrdinalIgnoreCase);
 
+    // A single recording can't plausibly last centuries; clamp so a crafted/corrupt sidecar (e.g.
+    // StartTime=0001, StopTime=9999) can't propagate an absurd duration into UI/date math. Mirrors the
+    // MKV reader's ceiling.
+    private static readonly TimeSpan MaxDuration = TimeSpan.FromTicks(TimeSpan.TicksPerDay * 366 * 200);
+
     public TimeSpan? Duration => StartTimeUtc is { } start && StopTimeUtc is { } stop && stop >= start
-        ? stop - start
+        ? (stop - start is var d && d > MaxDuration ? MaxDuration : d)
         : null;
 }
 

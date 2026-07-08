@@ -155,6 +155,21 @@ public sealed class TimeSegment
             TimeAxis.ToDateTime(start));
     }
 
+    /// <summary><paramref name="start"/> + <paramref name="duration"/>, saturating at
+    /// <see cref="DateTime.MaxValue"/> instead of throwing on a pathological (corrupt/crafted) duration.
+    /// Negative durations are floored to zero. Shared by the browse-tree labels and the card-summary span
+    /// so a single bad recording can never overflow DateTime and abort the whole card open.</summary>
+    public static DateTime SafeEnd(DateTime start, TimeSpan duration)
+    {
+        if (duration < TimeSpan.Zero)
+        {
+            duration = TimeSpan.Zero;
+        }
+
+        var max = DateTime.MaxValue - start;
+        return duration > max ? DateTime.MaxValue : start + duration;
+    }
+
     /// <summary>Best-known duration without requiring metadata (used for labels and span math).</summary>
     public static TimeSpan EstimateDuration(Recording recording)
     {

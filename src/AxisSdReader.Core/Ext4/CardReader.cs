@@ -62,7 +62,7 @@ public sealed class CardReader : IDisposable
     public bool IsEncrypted { get; }
 
     /// <summary>Opens a card image file (.img/.dd) read-only, unlocking LUKS if <paramref name="passphrase"/> is given.</summary>
-    public static CardReader OpenImage(string imagePath, string? passphrase = null)
+    public static CardReader OpenImage(string imagePath, char[]? passphrase = null)
     {
         var stream = new FileStream(imagePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         return Open(stream, Ownership.Dispose, passphrase);
@@ -73,7 +73,7 @@ public sealed class CardReader : IDisposable
     /// physical device). The stream must be seekable and report a correct <see cref="Stream.Length"/>.
     /// If the card is LUKS-encrypted, supply <paramref name="passphrase"/> to unlock it.
     /// </summary>
-    public static CardReader Open(Stream diskStream, Ownership ownership, string? passphrase = null)
+    public static CardReader Open(Stream diskStream, Ownership ownership, char[]? passphrase = null)
     {
         var disk = new RawDisk(diskStream, ownership);
         try
@@ -87,7 +87,7 @@ public sealed class CardReader : IDisposable
         }
     }
 
-    private static CardReader Open(RawDisk disk, string? passphrase)
+    private static CardReader Open(RawDisk disk, char[]? passphrase)
     {
         var content = disk.Content;
 
@@ -110,7 +110,7 @@ public sealed class CardReader : IDisposable
         var sawLuks = false;
         var sawLuks1Locked = false; // a supported (LUKS1) volume is present but locked (no passphrase yet)
         var sawExt = false;
-        var havePassphrase = !string.IsNullOrEmpty(passphrase);
+        var havePassphrase = passphrase is { Length: > 0 };
         string? extFailure = null;
         string? luksUnsupported = null;
 
@@ -198,7 +198,7 @@ public sealed class CardReader : IDisposable
     /// continue.
     /// </summary>
     private static CardReader? TryOpenLuks(RawDisk disk, SparseStream content, CardVolumeInfo volume,
-        string passphrase, ref string? luksUnsupported)
+        char[] passphrase, ref string? luksUnsupported)
     {
         var luksPartition = new SubStream(content, volume.FirstByte, volume.LengthBytes);
 
