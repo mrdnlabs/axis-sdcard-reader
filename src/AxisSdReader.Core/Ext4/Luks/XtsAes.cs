@@ -32,7 +32,19 @@ internal sealed class XtsAes : IDisposable
         var aes = Aes.Create();
         aes.Mode = CipherMode.ECB;
         aes.Padding = PaddingMode.None;
-        aes.Key = key.ToArray();
+
+        // The Key setter clones its argument internally (cleared on aes.Dispose), so zero our transient
+        // copy immediately rather than abandoning raw key material to the GC heap.
+        var k = key.ToArray();
+        try
+        {
+            aes.Key = k;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(k);
+        }
+
         return aes;
     }
 

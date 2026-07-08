@@ -38,7 +38,7 @@ public sealed class SdCardSession : IDisposable
     /// <param name="diskNumber">The physical disk number (see <see cref="DiskEnumerator"/>).</param>
     /// <param name="guardVolumes">Lock/dismount volumes and remove drive letters first. Disable only for diagnostics.</param>
     /// <param name="passphrase">Passphrase to unlock a LUKS-encrypted card, or null for an unencrypted card.</param>
-    public static SdCardSession Open(int diskNumber, bool guardVolumes = true, string? passphrase = null)
+    public static SdCardSession Open(int diskNumber, bool guardVolumes = true, char[]? passphrase = null)
     {
         VolumeGuard? guard = null;
         RawDiskStream? raw = null;

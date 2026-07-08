@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build (Release)
+        run: dotnet build --configuration Release --no-restore
+
+      # The ext4 card-image fixture is generated with WSL + e2fsprogs, which hosted runners don't have, so
+      # those tests run locally. CI gates the WSL-free suites: LUKS crypto (incl. hostile-header fuzz) and
+      # MKV untrusted-input parsing — the security-critical paths.
+      - name: Test (WSL-free suites)
+        run: dotnet test --configuration Release --no-build --filter "FullyQualifiedName~LuksTests|FullyQualifiedName~MkvMetadataReaderTests"

@@ -67,16 +67,19 @@ public sealed class Recording
     {
         get
         {
-            TimeSpan? total = null;
+            long? totalTicks = null;
             foreach (var chunk in Chunks)
             {
                 if (chunk.Duration is { } d)
                 {
-                    total = (total ?? TimeSpan.Zero) + d;
+                    var acc = totalTicks ?? 0L;
+                    // Saturate instead of throwing OverflowException: a crafted/corrupt sidecar can report an
+                    // enormous per-chunk duration, and this getter runs on the WPF UI thread (label refresh).
+                    totalTicks = d.Ticks > long.MaxValue - acc ? long.MaxValue : acc + d.Ticks;
                 }
             }
 
-            return total;
+            return totalTicks is { } ticks ? TimeSpan.FromTicks(ticks) : null;
         }
     }
 

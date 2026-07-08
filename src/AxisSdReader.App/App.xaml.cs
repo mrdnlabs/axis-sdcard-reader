@@ -9,8 +9,13 @@ public partial class App : Application
     /// <summary>Card image path passed on the command line, auto-opened at startup (dev/testing aid).</summary>
     public static string? StartupImagePath { get; private set; }
 
-    private static readonly string CrashLog =
-        Path.Combine(Path.GetTempPath(), "axis-sd-reader-errors.log");
+    // Per-user app-data (not the world-readable %TEMP%) so a shared machine doesn't expose one user's log.
+    private static readonly string CrashLog = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "AxisSdReader", "logs", "errors.log");
+
+    /// <summary>The running build's version (from the assembly), shown in logs and the window title.</summary>
+    public static string Version { get; } = typeof(App).Assembly.GetName().Version?.ToString(3) ?? "?";
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -27,6 +32,9 @@ public partial class App : Application
             Log("UnobservedTask", args.Exception);
             args.SetObserved();
         };
+
+        // Reclaim any export temp folders orphaned by a previous crash / power loss before we start.
+        AxisSdReader.Core.Export.FfmpegExporter.SweepStaleTempDirs();
 
         // Locates the libvlc native libraries shipped by VideoLAN.LibVLC.Windows.
         LibVLCSharp.Shared.Core.Initialize();
@@ -53,7 +61,14 @@ public partial class App : Application
     {
         try
         {
-            File.AppendAllText(CrashLog, $"[{DateTime.Now:O}] {source}: {ex}\n\n");
+            Directory.CreateDirectory(Path.GetDirectoryName(CrashLog)!);
+
+            // Log type + message + stack, but not the raw ToString(): release builds ship no PDB, so the
+            // stack carries method names without absolute build-machine source paths.
+            var detail = ex is null
+                ? "(no exception object)"
+                : $"{ex.GetType().FullName}: {ex.Message}\n{ex.StackTrace}";
+            File.AppendAllText(CrashLog, $"[{DateTime.Now:O}] v{Version} {source}: {detail}\n\n");
         }
         catch
         {

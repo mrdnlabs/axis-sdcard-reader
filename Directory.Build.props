@@ -1,0 +1,23 @@
+<Project>
+
+  <!-- Shared identity + release hardening applied to every project in the solution. -->
+  <PropertyGroup>
+    <Version>1.0.1</Version>
+    <AssemblyVersion>1.0.1.0</AssemblyVersion>
+    <FileVersion>1.0.1.0</FileVersion>
+    <InformationalVersion>1.0.1</InformationalVersion>
+    <Product>Axis SD Card Reader</Product>
+    <Authors>mrdnlabs</Authors>
+    <Copyright>Copyright (c) 2026 mrdnlabs</Copyright>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <!-- The shipped assemblies drop their PDB in Release builds, so exception stack traces carry method
+       names without absolute build-machine source paths (log hygiene) and no .pdb leaks into the package.
+       CardProbe (diagnostics) and the test project keep symbols. Debug keeps full symbols everywhere. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' And ('$(MSBuildProjectName)' == 'AxisSdReader.App' Or '$(MSBuildProjectName)' == 'AxisSdReader.Core')">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+</Project>
