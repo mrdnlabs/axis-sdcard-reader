@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using AxisSdReader.App.ViewModels;
+using AxisSdReader.Core.Axis;
 
 namespace AxisSdReader.App.Controls;
 
@@ -128,29 +129,21 @@ public sealed class DayOverviewControl : FrameworkElement
             dc.DrawLine(gridPen, new Point(x, 1), new Point(x, StripHeight - 1));
         }
 
-        // Recording segments (faded accent).
-        var accent = (Theme.Brush("Accent") as SolidColorBrush)?.Color ?? Colors.DodgerBlue;
-        var segBrush = new SolidColorBrush(accent) { Opacity = 0.75 };
-        segBrush.Freeze();
+        // Recording segments, coloured by kind (continuous=blue, event=red, manual=yellow). Higher-priority
+        // kinds are drawn on top where they overlap, matching the detail track.
         if (SegmentsSource is not null)
         {
-            foreach (var item in SegmentsSource)
+            var segs = SegmentsSource.OfType<TimelineSegment>()
+                .Where(s => s.EndSeconds - dayStart >= 0 && s.StartSeconds - dayStart <= day)
+                .OrderBy(s => RecordingTypeClassifier.OverlayPriority(s.Kind));
+            foreach (var segment in segs)
             {
-                if (item is not TimelineSegment segment)
-                {
-                    continue;
-                }
-
                 var s = segment.StartSeconds - dayStart;
                 var e = segment.EndSeconds - dayStart;
-                if (e < 0 || s > day)
-                {
-                    continue;
-                }
-
                 var x1 = Math.Max(0, s) / day * width;
                 var x2 = Math.Min(day, e) / day * width;
-                dc.DrawRoundedRectangle(segBrush, null, new Rect(x1, 4, Math.Max(1.5, x2 - x1), 10), 2, 2);
+                dc.DrawRoundedRectangle(Theme.RecordingBrush(segment.Kind), null,
+                    new Rect(x1, 4, Math.Max(1.5, x2 - x1), 10), 2, 2);
             }
         }
 

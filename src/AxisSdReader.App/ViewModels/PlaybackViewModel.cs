@@ -666,7 +666,8 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         TimelineSegments.Clear();
         foreach (var segment in _segments)
         {
-            TimelineSegments.Add(new TimelineSegment(segment.StartSeconds, segment.EndSeconds));
+            TimelineSegments.Add(new TimelineSegment(
+                segment.StartSeconds, segment.EndSeconds, segment.Recording.Kind));
         }
     }
 

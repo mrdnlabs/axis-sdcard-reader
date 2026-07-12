@@ -4,11 +4,13 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using AxisSdReader.App.ViewModels;
+using AxisSdReader.Core.Axis;
 
 namespace AxisSdReader.App.Controls;
 
-/// <summary>A recording segment on the continuous time axis (TimeAxis seconds).</summary>
-public sealed record TimelineSegment(double StartSeconds, double EndSeconds);
+/// <summary>A recording segment on the continuous time axis (TimeAxis seconds), with its trigger kind
+/// for colour-coding.</summary>
+public sealed record TimelineSegment(double StartSeconds, double EndSeconds, RecordingKind Kind = RecordingKind.Continuous);
 
 /// <summary>
 /// The detail track: a scrolling window of time beneath a stationary center cursor
@@ -253,26 +255,28 @@ public sealed class TimelineControl : FrameworkElement
             labels.Add((x, isMidnight ? time.ToString("MMM d") : time.ToString(span <= 900 ? "HH:mm:ss" : "HH:mm"), isMidnight));
         }
 
-        // Segments with inline labels when wide enough.
-        foreach (var segment in EnumerateSegments())
+        // Recording segments, coloured by kind (continuous=blue, event/motion=red, manual=yellow). Where
+        // kinds overlap in time — ACS Edge records continuous + motion in parallel — draw the lowest
+        // priority first so the higher-priority colour lands on top (manual > event > scheduled > continuous).
+        var visible = EnumerateSegments()
+            .Where(s => s.EndSeconds >= leftSeconds && s.StartSeconds <= rightSeconds)
+            .OrderBy(s => RecordingTypeClassifier.OverlayPriority(s.Kind))
+            .ToList();
+        foreach (var segment in visible)
         {
-            if (segment.EndSeconds < leftSeconds || segment.StartSeconds > rightSeconds)
-            {
-                continue;
-            }
-
             var x1 = (segment.StartSeconds - leftSeconds) / spp;
             var x2 = (segment.EndSeconds - leftSeconds) / spp;
             var rect = new Rect(x1, trackTop + 8, Math.Max(2, x2 - x1), 34);
-            dc.DrawRoundedRectangle(accent, null, rect, 4, 4);
+            dc.DrawRoundedRectangle(Theme.RecordingBrush(segment.Kind), null, rect, 4, 4);
 
             if (rect.Width >= 90)
             {
                 var start = TimeAxis.ToDateTime(segment.StartSeconds);
                 var dur = TimeSpan.FromSeconds(segment.EndSeconds - segment.StartSeconds);
                 var durText = dur.TotalHours >= 1 ? $"{(int)dur.TotalHours}h {dur.Minutes}m" : $"{Math.Max(1, (int)dur.TotalMinutes)}m";
+                var labelBrush = segment.Kind == RecordingKind.Manual ? Brushes.Black : Brushes.White;
                 var text = new FormattedText($"{start:HH:mm} · {durText}", CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, MonoFace, 11, Brushes.White, dpi)
+                    FlowDirection.LeftToRight, MonoFace, 11, labelBrush, dpi)
                 {
                     MaxTextWidth = Math.Max(0, rect.Width - 16),
                     MaxLineCount = 1,

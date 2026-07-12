@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Media;
+using AxisSdReader.Core.Axis;
 
 namespace AxisSdReader.App;
 
@@ -78,6 +79,15 @@ public static class Theme
         Set(r, "Sel", sel);
         SetAlpha(r, "SelFill", selColor, 0.30);
 
+        // Recording-type colours for the timeline (Axis convention: continuous = blue, event/motion = red,
+        // manual = yellow), plus scheduled and a neutral "other". The manual gold is kept distinct from the
+        // brighter export-range yellow above.
+        Set(r, "RecContinuous", dark ? "#3b82f6" : "#2f6fed");
+        Set(r, "RecEvent", dark ? "#ef4444" : "#dc2626");
+        Set(r, "RecManual", dark ? "#eab308" : "#ca8a04");
+        Set(r, "RecScheduled", dark ? "#14b8a6" : "#0d9488");
+        Set(r, "RecOther", dark ? "#8b95a0" : "#8a929c");
+
         Changed?.Invoke();
     }
 
@@ -98,4 +108,14 @@ public static class Theme
     /// <summary>Convenience for custom-drawn controls: current brush for a token.</summary>
     public static Brush Brush(string token) =>
         System.Windows.Application.Current.TryFindResource("T." + token) as Brush ?? Brushes.Magenta;
+
+    /// <summary>Timeline brush for a recording kind (continuous/event/manual/scheduled/other).</summary>
+    public static Brush RecordingBrush(RecordingKind kind) => Brush(kind switch
+    {
+        RecordingKind.Continuous => "RecContinuous",
+        RecordingKind.Event => "RecEvent",
+        RecordingKind.Manual => "RecManual",
+        RecordingKind.Scheduled => "RecScheduled",
+        _ => "RecOther",
+    });
 }
