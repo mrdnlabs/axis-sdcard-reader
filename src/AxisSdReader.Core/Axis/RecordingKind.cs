@@ -24,25 +24,39 @@ public enum RecordingKind
 }
 
 /// <summary>
-/// Classifies a recording into a <see cref="RecordingKind"/> from the trigger fields the camera writes
-/// into <c>recording.xml</c> (<c>&lt;CustomAttributes&gt;&lt;TriggerType&gt;/&lt;TriggerName&gt;</c>).
-/// Matching is deliberately tolerant/keyword-based: continuous is reliably <c>"continuous"</c>, but
-/// event and manual strings vary by firmware and by the (user-named) action rule, so we match on
-/// substrings of both fields. Unknown non-empty triggers fall back to <see cref="RecordingKind.Other"/>.
+/// Classifies a recording into a <see cref="RecordingKind"/> from the trigger fields the camera writes into
+/// <c>recording.xml</c> (<c>&lt;CustomAttributes&gt;</c>: <c>TriggerType</c>, <c>TriggerName</c>,
+/// <c>TriggerTrigger</c>).
+///
+/// No single field is reliable, so all three are matched together as tolerant, lower-cased substrings:
+/// <list type="bullet">
+/// <item>A VAPIX-configured card writes <c>TriggerType=continuous</c>.</item>
+/// <item>An AXIS Camera Station Edge card writes <c>TriggerType=triggered</c> on EVERY recording —
+/// continuous included — and only distinguishes them by the action-rule fields
+/// (<c>ACC_Continuous_&lt;serial&gt;_0</c> / <c>ACC_ContinuousAction</c> vs
+/// <c>ACC_Motion_&lt;serial&gt;_0</c> / <c>ACC_MotionAction</c>). Verified on a real ACS Edge card.</item>
+/// </list>
+/// Unknown non-empty triggers fall back to <see cref="RecordingKind.Other"/> rather than being guessed.
 /// </summary>
 public static class RecordingTypeClassifier
 {
     // Substrings that mark an event-triggered recording (motion/analytics/alarm/etc.).
+    //
+    // Deliberately does NOT include "trigger": ACS Edge sets TriggerType="triggered" on every recording,
+    // continuous included, so that word carries no information and would mislabel continuous footage as
+    // motion for any rule name we don't otherwise recognise.
     private static readonly string[] EventHints =
     [
         "motion", "vmd", "analytic", "object", "event", "detect", "alarm", "tamper",
-        "intrusion", "fence", "cross", "loiter", "trigger", "input", "activity", "rule",
+        "intrusion", "fence", "cross", "loiter", "input", "activity", "rule",
     ];
 
-    /// <summary>Classifies from the recording.xml trigger type/name. Case-insensitive; either may be null.</summary>
-    public static RecordingKind Classify(string? triggerType, string? triggerName)
+    /// <summary>Classifies from the recording.xml trigger fields. Case-insensitive; any may be null.</summary>
+    public static RecordingKind Classify(string? triggerType, string? triggerName, string? triggerTrigger = null)
     {
-        var text = ((triggerType ?? string.Empty) + " " + (triggerName ?? string.Empty)).ToLowerInvariant();
+        var text = string.Join(
+                ' ', triggerType ?? string.Empty, triggerName ?? string.Empty, triggerTrigger ?? string.Empty)
+            .ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(text))
         {
             return RecordingKind.Other;

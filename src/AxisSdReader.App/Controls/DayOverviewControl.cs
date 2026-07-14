@@ -158,6 +158,19 @@ public sealed class DayOverviewControl : FrameworkElement
             }
         }
 
+        // A tick per export mark, so a lone mark-in is visible here too (matching the detail track's brackets).
+        foreach (var mark in new[] { SelInSeconds, SelOutSeconds })
+        {
+            if (mark is { } m)
+            {
+                var mx = (m - dayStart) / day * width;
+                if (mx >= 0 && mx <= width)
+                {
+                    dc.DrawRectangle(Theme.Brush("Sel"), null, new Rect(mx - 1, 3, 2, StripHeight - 6));
+                }
+            }
+        }
+
         dc.Pop();
 
         // Viewport rectangle for the zoomed window.

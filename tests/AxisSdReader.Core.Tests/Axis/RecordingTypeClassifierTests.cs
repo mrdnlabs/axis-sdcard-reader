@@ -30,6 +30,33 @@ public class RecordingTypeClassifierTests
         Assert.Equal(RecordingKind.Event, RecordingTypeClassifier.Classify(null, "MOTION"));
     }
 
+    // The real trigger metadata from an AXIS Camera Station Edge card (verified against hardware
+    // 2026-07-14). TriggerType is "triggered" for BOTH kinds, so only the action-rule fields tell them
+    // apart — this is the regression that matters most.
+    [Theory]
+    [InlineData("triggered", "ACC_Continuous_E827251FFB8D_0", "ACC_ContinuousAction", RecordingKind.Continuous)]
+    [InlineData("triggered", "ACC_Motion_E827251FFB8D_0", "ACC_MotionAction", RecordingKind.Event)]
+    public void ClassifiesRealAcsEdgeTriggers(string type, string name, string trigger, RecordingKind expected)
+    {
+        Assert.Equal(expected, RecordingTypeClassifier.Classify(type, name, trigger));
+    }
+
+    [Fact]
+    public void TriggeredAloneIsNotTreatedAsAnEvent()
+    {
+        // ACS Edge stamps TriggerType="triggered" on every recording, continuous included, so the word must
+        // carry no weight on its own — otherwise unrecognised continuous footage would paint red.
+        Assert.Equal(RecordingKind.Other, RecordingTypeClassifier.Classify("triggered", null));
+    }
+
+    [Fact]
+    public void ClassifiesRealVapixContinuousTrigger()
+    {
+        // A VAPIX-configured card (the other real card we have) states the type directly.
+        Assert.Equal(RecordingKind.Continuous,
+            RecordingTypeClassifier.Classify("continuous", "continuous", "continuous"));
+    }
+
     [Fact]
     public void OverlayPriorityMatchesYellowOverRedOverBlue()
     {

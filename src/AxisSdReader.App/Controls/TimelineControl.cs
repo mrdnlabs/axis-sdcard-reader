@@ -206,7 +206,8 @@ public sealed class TimelineControl : FrameworkElement
         var dayPen = new Pen(Theme.Brush("Border2"), 1);
         var accent = Theme.Brush("Accent");
         var selFill = Theme.Brush("SelFill");
-        var selPen = new Pen(Theme.Brush("Sel"), 1.5);
+        var selBrush = Theme.Brush("Sel");
+        var selPen = new Pen(selBrush, 1.5);
         var playhead = Theme.Brush("Playhead");
         var playheadHalo = new Pen(Theme.Brush("PlayheadHalo"), 1);
         var faint = Theme.Brush("Faint");
@@ -286,7 +287,7 @@ public sealed class TimelineControl : FrameworkElement
             }
         }
 
-        // Export selection band.
+        // Export selection: the filled band once BOTH marks are set...
         if (SelInSeconds is { } inSec && SelOutSeconds is { } outSec && outSec > inSec &&
             outSec > leftSeconds && inSec < rightSeconds)
         {
@@ -294,6 +295,18 @@ public sealed class TimelineControl : FrameworkElement
             var x2 = (outSec - leftSeconds) / spp;
             dc.DrawRoundedRectangle(selFill, selPen,
                 new Rect(x1, trackTop + 4, Math.Max(2, x2 - x1), TrackHeight - 8), 4, 4);
+        }
+
+        // ...plus a bracket at each mark, drawn independently of the other so a lone mark-in is visible
+        // immediately instead of only appearing once mark-out completes the band.
+        if (SelInSeconds is { } markIn && markIn >= leftSeconds && markIn <= rightSeconds)
+        {
+            DrawMarkBracket(dc, selBrush, (markIn - leftSeconds) / spp, trackTop, isIn: true);
+        }
+
+        if (SelOutSeconds is { } markOut && markOut >= leftSeconds && markOut <= rightSeconds)
+        {
+            DrawMarkBracket(dc, selBrush, (markOut - leftSeconds) / spp, trackTop, isIn: false);
         }
 
         dc.Pop();
@@ -329,6 +342,22 @@ public sealed class TimelineControl : FrameworkElement
         <= 21600 => 3600,
         _ => 3 * 3600,
     };
+
+    /// <summary>Draws a "[" (mark-in) or "]" (mark-out) bracket at an export mark, so each mark is visible
+    /// on its own — before the opposite one is placed — as well as at the ends of a completed band.</summary>
+    private static void DrawMarkBracket(DrawingContext dc, Brush brush, double x, double trackTop, bool isIn)
+    {
+        const double Arm = 7;
+        const double Thick = 2;
+
+        var top = trackTop + 4;
+        var bottom = trackTop + TrackHeight - 4;
+        var armX = isIn ? x : x - Arm; // arms point into the selection
+
+        dc.DrawRectangle(brush, null, new Rect(x - Thick / 2, top, Thick, bottom - top)); // upright
+        dc.DrawRectangle(brush, null, new Rect(armX, top, Arm, Thick));                   // top arm
+        dc.DrawRectangle(brush, null, new Rect(armX, bottom - Thick, Arm, Thick));        // bottom arm
+    }
 
     private static StreamGeometry Triangle(Point a, Point b, Point c)
     {

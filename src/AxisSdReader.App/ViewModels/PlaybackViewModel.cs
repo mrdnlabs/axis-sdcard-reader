@@ -32,6 +32,7 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
     private MediaInput? _currentInput;
     private Media? _currentMedia;
     private bool _isScrubbing;
+    private bool _switchingStream; // re-entrancy guard for the follow-the-top-band stream switch
     private int _seekVersion;
     private bool _disposed;
 
@@ -314,7 +315,7 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         ShowSeekingIfSlow(version, () => seekDone);
         try
         {
-            var segIndex = Array.FindIndex(_segments, s => s.Contains(seconds));
+            var segIndex = BestSegmentIndex(seconds);
             if (segIndex < 0)
             {
                 StopPlayback();
@@ -521,9 +522,10 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Builds export jobs for the current selection: one slice per overlapping recording
-    /// (recordings are gap-separated, so each becomes its own trimmed output). Ensures each
-    /// segment's chunk metadata is exact so trim offsets are accurate.
+    /// Builds export jobs for the current selection: one slice per recording overlapping the range, each
+    /// trimmed to the range. Recordings can overlap in time — ACS Edge records continuous and motion in
+    /// parallel — so a range covered by both deliberately yields BOTH clips; the caller tells them apart by
+    /// <see cref="Recording.Kind"/>. Ensures each segment's chunk metadata is exact so trims are accurate.
     /// </summary>
     public async Task<IReadOnlyList<ExportSlice>> BuildExportSlices()
     {
@@ -623,6 +625,52 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         try { stream?.Dispose(); } catch { /* best effort */ }
     }
 
+    /// <summary>
+    /// The recording to play at an axis position. Recordings can overlap — ACS Edge records continuous
+    /// (low profile) and motion (high profile) in parallel — so the higher-priority kind wins: playback
+    /// follows the same band the timeline paints on top (manual &gt; event &gt; continuous), which is also
+    /// normally the higher-quality stream. Returns -1 when nothing covers the position.
+    /// </summary>
+    private int BestSegmentIndex(double seconds)
+    {
+        var best = -1;
+        var bestPriority = int.MinValue;
+        for (var i = 0; i < _segments.Length; i++)
+        {
+            if (!_segments[i].Contains(seconds))
+            {
+                continue;
+            }
+
+            var priority = RecordingTypeClassifier.OverlayPriority(_segments[i].Recording.Kind);
+            if (priority > bestPriority)
+            {
+                bestPriority = priority;
+                best = i;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>Switches playback to the best recording covering <paramref name="seconds"/>, clearing the
+    /// re-entrancy guard when the swap settles.</summary>
+    private async Task SwitchStreamAsync(double seconds)
+    {
+        try
+        {
+            await SeekToSeconds(seconds, autoPlay: true);
+        }
+        catch (OperationCanceledException)
+        {
+            // the card was closed/removed mid-switch — nothing to do
+        }
+        finally
+        {
+            _switchingStream = false;
+        }
+    }
+
     private void OnChunkTimeChanged(long chunkTimeMs)
     {
         if (_isScrubbing || _activeSegment < 0 || _activeSegment >= _segments.Length)
@@ -632,6 +680,22 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
 
         var segment = _segments[_activeSegment];
         CurrentSeconds = segment.SecondsAtChunkStart(_activeChunk) + chunkTimeMs / 1000.0;
+
+        // Follow the top band: when a higher-priority recording (a motion event) starts covering this
+        // moment, switch to it — and back to continuous when it ends — so playback always shows the stream
+        // the timeline paints on top. Guarded: VLC raises TimeChanged several times a second, and the swap
+        // itself is async.
+        if (_switchingStream || !IsPlaying)
+        {
+            return;
+        }
+
+        var best = BestSegmentIndex(CurrentSeconds);
+        if (best >= 0 && best != _activeSegment)
+        {
+            _switchingStream = true;
+            _ = SwitchStreamAsync(CurrentSeconds);
+        }
     }
 
     private void OnChunkEnded()
@@ -648,11 +712,22 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Recording finished — seamlessly jump to the next one, skipping the gap.
-        var nextIndex = _activeSegment + 1;
-        if (nextIndex < _segments.Length)
+        // Recording finished. If another recording still covers this moment — e.g. a motion event ended but
+        // the parallel continuous recording runs on — resume there at the same wall-clock time rather than
+        // skipping ahead to the next recording's start.
+        if (BestSegmentIndex(segment.EndSeconds) >= 0)
         {
-            _ = SeekToSeconds(_segments[nextIndex].StartSeconds, autoPlay: true);
+            _ = SeekToSeconds(segment.EndSeconds, autoPlay: true);
+            return;
+        }
+
+        // Otherwise jump forward to the next recording, skipping the gap. Pick it by TIME, not by index:
+        // recordings overlap (continuous + motion), so the next index can start EARLIER than this one
+        // ended, which would jump playback backwards and loop. _segments is ordered by start time.
+        var next = _segments.FirstOrDefault(s => s.StartSeconds >= segment.EndSeconds);
+        if (next is not null)
+        {
+            _ = SeekToSeconds(next.StartSeconds, autoPlay: true);
         }
         else
         {

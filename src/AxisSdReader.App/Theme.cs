@@ -73,8 +73,10 @@ public static class Theme
         SetAlpha(r, "AccentHalo", accentColor, dark ? 0.30 : 0.22);
         r["T.AccentColor"] = accentColor; // for drop shadows
 
-        // Export-range/mark color: a fixed yellow that never collides with the blue accent.
-        var sel = "#f7c948";
+        // Export-range/mark colour: purple. Deliberately distinct from every recording-type colour below
+        // (blue continuous, red event, YELLOW manual, teal scheduled) and from the blue accent — the old
+        // yellow now collides with manual recordings. Green is avoided: it reads as the trust/locked pill.
+        var sel = dark ? "#a855f7" : "#7e22ce";
         var selColor = (Color)ColorConverter.ConvertFromString(sel);
         Set(r, "Sel", sel);
         SetAlpha(r, "SelFill", selColor, 0.30);
