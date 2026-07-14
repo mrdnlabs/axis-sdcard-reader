@@ -81,27 +81,37 @@ Windows is admin-only).
 
 Trimmed export (MP4 remux / MKV, cut to the marked in/out range) shells out to
 **FFmpeg** using stream copy (`-c copy`) — no re-encode, so it is fast and
-lossless. The app locates `ffmpeg.exe` in this order:
+lossless.
+
+**The released standalone exe bundles FFmpeg** (an LGPL v3 build with no GPL
+components — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)), so export works
+out of the box with nothing to install.
+
+When building from source, the app locates `ffmpeg.exe` in this order:
 
 1. an `ffmpeg` folder next to the app executable,
 2. next to the app executable directly,
 3. on the system `PATH` — **only when not running elevated** (see below).
 
 Because the app runs as administrator, it deliberately does **not** search the
-`PATH` for `ffmpeg.exe`: a `PATH` directory writable by a standard user could let
-that user plant a binary that then executes with administrator rights. Place
-`ffmpeg.exe` in an `ffmpeg` folder next to the app (a location a standard user
-can't write when the app is installed under `Program Files`). If FFmpeg is
-missing, the app disables trimmed export and says so. (MP4 keeps the original
-codec — H.264/H.265/AV1 — so very old players may still need a modern build; a
-true re-encode-to-H.264 path and timestamp burn-in are future work.)
+`PATH`: a `PATH` directory writable by a standard user could let that user plant a
+binary that then executes with administrator rights. `tools\publish.ps1` fetches the
+LGPL FFmpeg into `src\AxisSdReader.App\ffmpeg\` (gitignored) so it gets bundled into
+the exe; for a dev build you can drop any `ffmpeg.exe` there yourself. If FFmpeg is
+missing, the app disables trimmed export and says so. (MP4 keeps the original codec —
+H.264/H.265/AV1 — so very old players may still need a modern build; a true
+re-encode-to-H.264 path and timestamp burn-in are future work.)
 
 ## Installing & verifying your download
 
-The released `AxisSdReader-vX.Y.Z-win-x64.zip` is **self-contained** — no .NET
-runtime install is needed. Extract it and run `AxisSdReader.App.exe` (accept the
-UAC prompt; raw disk access requires administrator rights). Install it under a
-location standard users can't write to (e.g. `Program Files`).
+The release is a **single standalone `AxisSdReader.App.exe`** — the .NET runtime,
+libVLC (and its plugins) and FFmpeg all live inside it. There is no installer and
+nothing to set up: extract the zip and run the exe (accept the UAC prompt; raw disk
+access requires administrator rights). The **first launch is slower** while it
+unpacks its payload to a per-version cache folder; later launches reuse it. The zip
+also carries the licence texts that must accompany the bundled components.
+
+Keep it somewhere standard users can't write to (e.g. `Program Files`).
 
 The executable is **not code-signed**, so on first run expect:
 

@@ -11,14 +11,25 @@ license and copyright. The relevant license texts are reproduced or linked below
 | [LibVLCSharp](https://github.com/videolan/libvlcsharp) / LibVLCSharp.WPF | 3.10.0 | LGPL-2.1-or-later | © the VideoLAN project and contributors |
 | [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) | 8.4.2 | MIT | © .NET Foundation and Contributors |
 | [DiscUtils](https://github.com/LTRData/DiscUtils) (`LTRData.DiscUtils.Core`, `.Ext`, `LTRData.Extensions`) | 1.0.85 | MIT | © Kenneth Bell, Olof Lagerkvist / LTR Data, and contributors |
-| [FFmpeg](https://ffmpeg.org) (optional, **not** distributed — see note) | user-supplied | LGPL-2.1-or-later / GPL (build-dependent) | © the FFmpeg project and contributors |
+| [FFmpeg](https://ffmpeg.org) (`ffmpeg.exe`, **bundled**) | n7.1 (LGPL build) | LGPL-3.0-or-later | © the FFmpeg project and contributors |
 
-## FFmpeg (optional, not bundled)
+## FFmpeg (bundled)
 
-FFmpeg is **not** included in this distribution. Trimmed MP4/MKV export is an optional feature that runs a
-separately-installed `ffmpeg.exe` as an external process (the app never links FFmpeg code). If you choose to
-place an `ffmpeg.exe` next to the app, that binary remains under its own license (LGPL-2.1-or-later or GPL,
-depending on the build you obtained); this project neither includes nor relicenses it.
+This distribution **includes** an unmodified `ffmpeg.exe`, used only to remux/trim exports by running it as a
+**separate process** (`-c copy`). The application never links against, or statically incorporates, any FFmpeg
+code — it only executes the binary, so the two are merely aggregated.
+
+- **Build:** `ffmpeg-n7.1-latest-win64-lgpl` from
+  [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (one of the Windows builders linked from
+  ffmpeg.org's download page), a 64-bit static build.
+- **Licence: LGPL-3.0-or-later.** The build is configured **without** `--enable-gpl` and with
+  `--disable-libx264 --disable-libx265`, so no GPL-licensed components are present; `--enable-version3`
+  makes it LGPL **v3**. The full licence text ships alongside the binary as `FFMPEG-LICENSE.txt`.
+- **Corresponding source:** FFmpeg's source is at <https://github.com/FFmpeg/FFmpeg> (release branch
+  `release/7.1`), and the exact build recipe/scripts used to produce this binary are at
+  <https://github.com/BtbN/FFmpeg-Builds>. No modifications were made by this project.
+- **Replacing it:** FFmpeg is invoked as a standalone executable, so you may substitute your own
+  `ffmpeg.exe` — place it in an `ffmpeg` folder next to the application and it will be used instead.
 
 ## LGPL-2.1 components (libVLC, LibVLCSharp)
 
