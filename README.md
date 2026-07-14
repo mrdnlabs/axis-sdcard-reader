@@ -104,14 +104,26 @@ re-encode-to-H.264 path and timestamp burn-in are future work.)
 
 ## Installing & verifying your download
 
-The release is a **single standalone `AxisSdReader.App.exe`** — the .NET runtime,
-libVLC (and its plugins) and FFmpeg all live inside it. There is no installer and
-nothing to set up: extract the zip and run the exe (accept the UAC prompt; raw disk
-access requires administrator rights). The **first launch is slower** while it
-unpacks its payload to a per-version cache folder; later launches reuse it. The zip
-also carries the licence texts that must accompany the bundled components.
+Each release ships **two packages** — same app, same bundled libVLC and FFmpeg, no
+prerequisites and no installer either way. Pick whichever suits the machine:
 
-Keep it somewhere standard users can't write to (e.g. `Program Files`).
+| Package | What it is | Best for |
+|---|---|---|
+| `…-win-x64-standalone.zip` | a **single** `AxisSdReader.App.exe` (~240 MB), everything inside it | any modern SSD — one file, nothing to deploy |
+| `…-win-x64-folder.zip` | the classic folder deploy | **hard disks and IT rollouts** — always launches instantly |
+
+Run `AxisSdReader.App.exe` and accept the UAC prompt (raw disk access requires
+administrator rights). Keep it somewhere standard users can't write to (e.g.
+`Program Files`).
+
+The **standalone** exe unpacks its payload to a per-version cache on first launch —
+around 6 seconds on an SSD, but appreciably longer on a hard disk, and with no
+progress shown (the unpacking happens in the .NET host *before* the app itself
+starts, so nothing can draw a splash). Later launches are instant. If that matters,
+or you'd rather not leave ~529 MB per version in `%TEMP%`, take the **folder**
+package — it never extracts anything.
+
+Both zips carry the licence texts that must accompany the bundled components.
 
 The executable is **not code-signed**, so on first run expect:
 
@@ -122,7 +134,7 @@ To verify integrity out-of-band, compare the release's published **SHA-256**
 against your download:
 
 ```
-Get-FileHash .\AxisSdReader-vX.Y.Z-win-x64.zip -Algorithm SHA256
+Get-FileHash .\AxisSdReader-vX.Y.Z-win-x64-standalone.zip -Algorithm SHA256
 ```
 
 ## Key dependencies
