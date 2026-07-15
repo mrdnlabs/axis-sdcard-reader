@@ -11,3 +11,6 @@ luks-dump.txt
 unlock-result.txt
 run-*.ps1
 *-dump.txt
+
+# Bundled FFmpeg binary (~104 MB LGPL build fetched by tools/publish.ps1) — never commit a binary this size
+src/AxisSdReader.App/ffmpeg/

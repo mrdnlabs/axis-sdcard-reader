@@ -50,6 +50,32 @@ numeric chunk names (`0.mkv`, `1.mkv`, ...). The indexer supports both.
 </Recording>
 ```
 
+### Recording type (continuous vs motion) — read this before trusting TriggerType
+
+The recording's trigger lives only in `<CustomAttributes>`, and **`TriggerType` alone is NOT a reliable
+discriminator** — what the camera writes depends on how recording was configured:
+
+| Configured by | `TriggerType` | `TriggerName` | `TriggerTrigger` |
+|---|---|---|---|
+| VAPIX / camera UI (observed 2026-07-02) | `continuous` | `continuous` | `continuous` |
+| **AXIS Camera Station Edge** (observed 2026-07-14) | `triggered` — for **both** kinds | `ACC_Continuous_<serial>_0` / `ACC_Motion_<serial>_0` | `ACC_ContinuousAction` / `ACC_MotionAction` |
+
+On an ACS Edge card **every** recording — continuous included — reports `TriggerType=triggered`; only the
+action-rule fields tell them apart. `RecordingTypeClassifier` therefore matches all three fields together as
+case-insensitive substrings, and deliberately ignores the word `trigger` (it would mark continuous
+footage as motion).
+
+ACS Edge also records **two streams in parallel** on the same `SourceToken`, overlapping in time:
+
+| Rule | Resolution | Framerate |
+|---|---|---|
+| `ACC_Motion_*` (high profile) | 3840×2160 | 15 |
+| `ACC_Continuous_*` (low profile) | 640×360 | 5 |
+
+So one instant can be covered by two recordings. The app paints the higher-priority kind on top
+(manual > event > continuous), plays that stream (the motion one is far higher quality), and exports **both**
+when a marked range covers both — tagging each output file with its type.
+
 ## Chunk sidecar XML
 
 ```xml

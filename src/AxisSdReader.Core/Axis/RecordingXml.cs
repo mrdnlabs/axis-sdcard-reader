@@ -5,6 +5,11 @@ using DiscUtils;
 namespace AxisSdReader.Core.Axis;
 
 /// <summary>Metadata from a recording's <c>recording.xml</c> (ONVIF-style, written by the camera).</summary>
+/// <param name="TriggerType">Broad trigger class. NOTE: not a reliable discriminator on its own — an
+/// AXIS Camera Station Edge card writes <c>triggered</c> here for BOTH continuous and motion recordings.</param>
+/// <param name="TriggerName">The action-rule name, e.g. <c>ACC_Motion_&lt;serial&gt;_0</c> /
+/// <c>ACC_Continuous_&lt;serial&gt;_0</c> on ACS Edge — usually the real discriminator.</param>
+/// <param name="TriggerTrigger">The rule's trigger, e.g. <c>ACC_MotionAction</c> / <c>ACC_ContinuousAction</c>.</param>
 public sealed record RecordingInfoXml(
     string? RecordingToken,
     DateTime? StartTimeUtc,
@@ -14,7 +19,8 @@ public sealed record RecordingInfoXml(
     int? Height,
     double? Framerate,
     string? TriggerType,
-    string? TriggerName);
+    string? TriggerName,
+    string? TriggerTrigger = null);
 
 /// <summary>Metadata from a chunk's sidecar XML (<c>&lt;RecordingBlock&gt;</c>).</summary>
 /// <param name="Status"><c>Complete</c>, or <c>Recording</c> when the camera was still writing
@@ -62,7 +68,8 @@ public static class RecordingXml
             ParseInt(video?.Element("Height")?.Value),
             ParseDouble(video?.Element("Framerate")?.Value),
             custom?.Element("TriggerType")?.Value,
-            custom?.Element("TriggerName")?.Value);
+            custom?.Element("TriggerName")?.Value,
+            custom?.Element("TriggerTrigger")?.Value);
     }
 
     public static RecordingBlockXml? TryParseBlock(DiscFileSystem fs, string path)

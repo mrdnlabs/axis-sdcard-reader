@@ -1009,7 +1009,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 foreach (var slice in slices)
                 {
                     index++;
-                    var baseName = $"{slice.WallClockStart:yyyy-MM-dd_HH-mm-ss}_{SanitizeForFileName(Player.CameraName)}";
+
+                    // Tag the file with the recording type. A range covered by BOTH continuous and motion
+                    // exports two clips with the same start time and camera, so without the type they would
+                    // differ only by a "(2)" suffix and be impossible to tell apart.
+                    var baseName = $"{slice.WallClockStart:yyyy-MM-dd_HH-mm-ss}_" +
+                                   $"{SanitizeForFileName(Player.CameraName)}_{KindLabel(slice.Recording.Kind)}";
+
                     // Never silently overwrite: disambiguate against files produced earlier in this run and
                     // any pre-existing files in the destination.
                     var outputPath = UniqueOutputPath(dialog.FolderName, baseName, extension, usedPaths);
@@ -1125,6 +1131,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Makes a camera name safe for a file name: invalid characters and spaces become '-'.</summary>
+    /// <summary>Short, file-safe name for a recording type, matching the timeline legend.</summary>
+    private static string KindLabel(RecordingKind kind) => kind switch
+    {
+        RecordingKind.Continuous => "continuous",
+        RecordingKind.Event => "motion",
+        RecordingKind.Manual => "manual",
+        RecordingKind.Scheduled => "scheduled",
+        _ => "recording",
+    };
+
     private static string SanitizeForFileName(string? name)
     {
         var invalid = Path.GetInvalidFileNameChars();

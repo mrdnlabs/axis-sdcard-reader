@@ -16,6 +16,15 @@
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" />
   </ItemGroup>
 
+  <!-- Optional bundled FFmpeg (LGPL v3 build). Fetched by tools\publish.ps1 and NOT committed (~104 MB).
+       Copied to the output as ffmpeg\ffmpeg.exe — exactly where FfmpegExporter.FindFfmpeg() looks — and
+       pulled into the single-file exe by IncludeAllContentForSelfExtract, so a standalone build can export
+       with nothing else installed and without ever searching PATH. Conditional: a fresh clone builds fine
+       without it (export then reports FFmpeg as unavailable, as before). -->
+  <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\ffmpeg\ffmpeg.exe')">
+    <Content Include="ffmpeg\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>

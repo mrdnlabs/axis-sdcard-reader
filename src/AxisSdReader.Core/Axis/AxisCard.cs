@@ -54,6 +54,11 @@ public sealed class Recording
     /// <summary>Trigger that started the recording (e.g. "continuous"), when recorded by the camera.</summary>
     public string? Trigger => Info?.TriggerType ?? Info?.TriggerName;
 
+    /// <summary>Recording type for timeline colour-coding (continuous / event / manual / …), classified
+    /// from the trigger metadata. <see cref="RecordingKind.Other"/> when no trigger info is present.</summary>
+    public RecordingKind Kind =>
+        RecordingTypeClassifier.Classify(Info?.TriggerType, Info?.TriggerName, Info?.TriggerTrigger);
+
     /// <summary>VAPIX source (lens) this recording came from; multi-sensor cameras use 1..N.</summary>
     public string SourceToken => Info?.SourceToken is { Length: > 0 } s ? s : "1";
 

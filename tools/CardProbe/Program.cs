@@ -18,6 +18,10 @@ using DiscUtils.Streams;
 // Extra operations (combinable, after --disk/--image):
 //   --tree [maxDepth]            recursive directory listing
 //   --dump <cardPath> <localPath>  copy a file off the card (repeatable)
+//   --recordings                 list every recording with its trigger metadata (continuous/motion/manual)
+//                                and dump the raw recording.xml of each distinct trigger type
+//   --pass-prompt                for an encrypted card: prompt (hidden) for the passphrase on stderr
+//   --pass <passphrase>          for an encrypted card: passphrase on the command line (avoid; prefer --pass-prompt)
 
 return args switch
 {
@@ -29,8 +33,26 @@ return args switch
     ["--unlock", var n, var pass] when int.TryParse(n, out var disk) => Unlock(RawDiskStream.OpenPhysicalDrive(disk), pass),
     ["--unlock-image", var path, var pass] => Unlock(File.OpenRead(path), pass),
     ["--mkv", var path] => ProbeMkv(path),
+    ["--echo-pass", .. var rest] => EchoPass(rest),
     _ => Usage(),
 };
+
+// Diagnostic: report the char count + SHA-256 of the passphrase actually received, so command-line
+// escaping of special characters (e.g. '!') can be verified end-to-end without revealing the passphrase.
+static int EchoPass(string[] options)
+{
+    var pass = ResolvePassphrase(options);
+    if (pass is null)
+    {
+        Console.WriteLine("no passphrase received");
+        return 1;
+    }
+
+    var utf8 = System.Text.Encoding.UTF8.GetBytes(pass);
+    var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(utf8));
+    Console.WriteLine($"received: chars={pass.Length} utf8bytes={utf8.Length} sha256={sha}");
+    return 0;
+}
 
 // Unlocks a LUKS-encrypted card with a passphrase and lists the decrypted ext4 root — an end-to-end
 // validation of the decryption chain. Read-only.
@@ -210,6 +232,54 @@ static int Usage()
     return 2;
 }
 
+// Resolves the LUKS passphrase for an encrypted card: a hidden interactive prompt (--pass-prompt, preferred —
+// keeps the secret off the command line) or a plain --pass argument. Null when neither is given.
+static char[]? ResolvePassphrase(string[] options)
+{
+    if (options.Contains("--pass-prompt"))
+    {
+        Console.Error.Write("SD card passphrase: ");
+        return ReadPasswordHidden();
+    }
+
+    var idx = Array.IndexOf(options, "--pass");
+    return idx >= 0 && idx + 1 < options.Length ? options[idx + 1].ToCharArray() : null;
+}
+
+// Reads a line from the console without echoing it (so a passphrase never appears on screen or in a log).
+static char[] ReadPasswordHidden()
+{
+    var chars = new List<char>();
+    while (true)
+    {
+        var key = Console.ReadKey(intercept: true);
+        if (key.Key == ConsoleKey.Enter)
+        {
+            Console.Error.WriteLine();
+            break;
+        }
+
+        if (key.Key == ConsoleKey.Backspace)
+        {
+            if (chars.Count > 0)
+            {
+                chars.RemoveAt(chars.Count - 1);
+                Console.Error.Write("\b \b"); // erase one masking asterisk
+            }
+
+            continue;
+        }
+
+        if (!char.IsControl(key.KeyChar))
+        {
+            chars.Add(key.KeyChar);
+            Console.Error.Write('*'); // mask, but show character count as feedback
+        }
+    }
+
+    return chars.ToArray();
+}
+
 static int ListDisks()
 {
     Console.WriteLine("Physical disks:");
@@ -237,7 +307,7 @@ static int ProbeDisk(int diskNumber, string[] options)
 
     try
     {
-        using var session = SdCardSession.Open(diskNumber, guard);
+        using var session = SdCardSession.Open(diskNumber, guard, ResolvePassphrase(options));
         foreach (var line in session.ProtectionLog)
         {
             Console.WriteLine($"  [protect] {line}");
@@ -257,7 +327,7 @@ static int ProbeImage(string path, string[] options)
 {
     Console.WriteLine($"Opening image {path}...");
     var sw = Stopwatch.StartNew();
-    using var card = CardReader.OpenImage(path);
+    using var card = CardReader.OpenImage(path, ResolvePassphrase(options));
     var result = Report(card, sw);
     return result != 0 ? result : RunExtraOps(card, options);
 }
@@ -277,6 +347,10 @@ static int RunExtraOps(CardReader card, string[] options)
                 PrintTree(fs, @"\", depth, "");
                 break;
 
+            case "--recordings":
+                DumpRecordings(fs);
+                break;
+
             case "--dump" when i + 2 < options.Length:
                 var src = options[i + 1];
                 var dst = options[i + 2];
@@ -293,6 +367,61 @@ static int RunExtraOps(CardReader card, string[] options)
     }
 
     return 0;
+}
+
+// Lists every recording with the trigger metadata that distinguishes continuous / motion / manual, then
+// dumps the raw recording.xml of the first recording of each distinct trigger, so we can read the exact
+// on-card vocabulary the camera writes. Read-only.
+static void DumpRecordings(DiscUtils.DiscFileSystem fs)
+{
+    var card = AxisSdReader.Core.Axis.AxisCardIndexer.Index(fs);
+    Console.WriteLine();
+    Console.WriteLine($"=== Recordings ({card.Recordings.Count}) ===");
+    Console.WriteLine("  start(local)         src  triggerType     triggerName        chunks  recordingId");
+
+    var firstOfCombo = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // "type|name" -> recording dir
+    foreach (var r in card.Recordings)
+    {
+        var type = r.Info?.TriggerType ?? "(none)";
+        var name = r.Info?.TriggerName ?? "(none)";
+        Console.WriteLine($"  {r.StartTime:yyyy-MM-dd HH:mm:ss}  {r.SourceToken,-3}  {type,-14}  {name,-16}  {r.Chunks.Count,5}  {r.Id}");
+        var combo = type + "|" + name;
+        if (!firstOfCombo.ContainsKey(combo))
+        {
+            firstOfCombo[combo] = r.DirectoryPath;
+        }
+    }
+
+    Console.WriteLine();
+    Console.WriteLine($"Distinct (triggerType | triggerName) combinations seen: {firstOfCombo.Count}");
+    foreach (var combo in firstOfCombo.Keys.OrderBy(k => k))
+    {
+        Console.WriteLine($"  {combo}");
+    }
+
+    foreach (var (combo, dir) in firstOfCombo)
+    {
+        var xmlPath = dir.TrimEnd('\\') + @"\recording.xml";
+        Console.WriteLine();
+        Console.WriteLine($"--- raw recording.xml for [{combo}]  ({xmlPath}) ---");
+        try
+        {
+            if (!fs.FileExists(xmlPath))
+            {
+                Console.WriteLine("(no recording.xml at this path)");
+                continue;
+            }
+
+            using var s = fs.OpenFile(xmlPath, FileMode.Open, FileAccess.Read);
+            using var reader = new StreamReader(s);
+            var text = reader.ReadToEnd();
+            Console.WriteLine(text.Length > 4000 ? text[..4000] + "\n…(truncated)" : text);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"(failed to read: {ex.Message})");
+        }
+    }
 }
 
 static void PrintTree(DiscUtils.DiscFileSystem fs, string path, int depthLeft, string indent)

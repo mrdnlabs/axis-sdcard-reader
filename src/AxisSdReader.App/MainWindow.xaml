@@ -749,10 +749,20 @@
                                     </StackPanel>
                                 </Border>
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,14,0">
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
-                                        <Border Width="12" Height="6" CornerRadius="2" Background="{DynamicResource T.Accent}"
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,12,0">
+                                        <Border Width="12" Height="6" CornerRadius="2" Background="{DynamicResource T.RecContinuous}"
                                                 VerticalAlignment="Center" Margin="0,0,6,0" />
-                                        <TextBlock Text="Recording" FontSize="11" Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
+                                        <TextBlock Text="Continuous" FontSize="11" Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,12,0">
+                                        <Border Width="12" Height="6" CornerRadius="2" Background="{DynamicResource T.RecEvent}"
+                                                VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <TextBlock Text="Motion" FontSize="11" Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
+                                        <Border Width="12" Height="6" CornerRadius="2" Background="{DynamicResource T.RecManual}"
+                                                VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <TextBlock Text="Manual" FontSize="11" Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal"
                                                 Visibility="{Binding Player.HasSelection, Converter={StaticResource BoolToVis}}">
