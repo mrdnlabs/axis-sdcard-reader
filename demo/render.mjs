@@ -144,10 +144,9 @@ async function launch() {
                     }
                     return r.result.value;
                 },
-                // Seek, then wait two animation frames so the compositor has presented the new state: capturing
-                // straight after the DOM update intermittently returned a tiled surface (a corner block repeated).
+                // The page's __seek draws frame t and resolves two animation frames later, once it is composited.
                 async seek(t) {
-                    await this.eval(`window.__seek(${t}); new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+                    await this.eval(`window.__seek(${t})`);
                 },
                 async screenshot() {
                     const { data } = await s('Page.captureScreenshot', { format: 'png', fromSurface: true });
