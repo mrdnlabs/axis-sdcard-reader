@@ -14,3 +14,6 @@ run-*.ps1
 
 # Bundled FFmpeg binary (~104 MB LGPL build fetched by tools/publish.ps1) — never commit a binary this size
 src/AxisSdReader.App/ffmpeg/
+
+# Demo video renders (regenerate with: node demo/render.mjs)
+demo/out/
