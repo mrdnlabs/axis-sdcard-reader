@@ -27,6 +27,7 @@ public sealed class TimelineControl : FrameworkElement
     private const double TrackHeight = 52;
     private const double LabelGap = 3;
     private const double LabelHeight = 15;
+    private const double MinLabelSpacing = 6; // clear space kept between neighbouring tick labels
     private const double ClickDragThresholdPx = 4;
 
     private static readonly Typeface MonoFace = new("Consolas");
@@ -311,13 +312,25 @@ public sealed class TimelineControl : FrameworkElement
 
         dc.Pop();
 
-        // Tick labels below the track.
+        // Tick labels below the track. Ticks just off either edge were collected above only so their gridlines
+        // bleed in; they get no label (v1.1.0 clamped them into view, stacking e.g. "12:00:00" onto its
+        // neighbour "12:00:30"). A label that would still collide with one already placed is skipped, and day
+        // labels are placed first so a date never loses out to a time.
         var labelY = trackTop + TrackHeight + LabelGap;
-        foreach (var (x, textStr, isDay) in labels)
+        var placed = new List<(double Left, double Right)>();
+        foreach (var (x, textStr, isDay) in labels.Where(l => l.X >= -1 && l.X <= width + 1).OrderByDescending(l => l.Day))
         {
             var text = new FormattedText(textStr, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
                 MonoFace, 10, isDay ? Theme.Brush("Muted2") : faint, dpi);
-            dc.DrawText(text, new Point(Math.Clamp(x - text.Width / 2, 0, Math.Max(0, width - text.Width)), labelY));
+            var left = Math.Clamp(x - text.Width / 2, 0, Math.Max(0, width - text.Width));
+            var right = left + text.Width;
+            if (placed.Any(p => left < p.Right + MinLabelSpacing && right + MinLabelSpacing > p.Left))
+            {
+                continue;
+            }
+
+            placed.Add((left, right));
+            dc.DrawText(text, new Point(left, labelY));
         }
 
         // Stationary center cursor with accent triangle handles (drawn over everything).

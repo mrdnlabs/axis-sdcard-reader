@@ -907,14 +907,17 @@
                                                 <Setter Property="Template">
                                                     <Setter.Value>
                                                         <!-- Active pill (Tag=true when Rate matches) uses DynamicResource brushes so it
-                                                             re-themes live on an accent/theme switch. -->
+                                                             re-themes live on an accent/theme switch. The trigger binds with RelativeSource
+                                                             Self: a template trigger's binding is evaluated on the templated Button itself,
+                                                             so TemplatedParent would resolve to the Button's own (null) templated parent
+                                                             and the pill never lit up (v1.1.0). -->
                                                         <ControlTemplate TargetType="Button">
                                                             <Border x:Name="Pill" CornerRadius="6" Padding="8,0" Background="Transparent"
                                                                     TextElement.Foreground="{TemplateBinding Foreground}">
                                                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                             </Border>
                                                             <ControlTemplate.Triggers>
-                                                                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Value="True">
+                                                                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="True">
                                                                     <Setter TargetName="Pill" Property="Background" Value="{DynamicResource T.Accent}" />
                                                                     <Setter TargetName="Pill" Property="TextElement.Foreground" Value="White" />
                                                                 </DataTrigger>

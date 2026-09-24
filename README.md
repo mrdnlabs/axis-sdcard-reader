@@ -5,6 +5,16 @@ micro SD cards used in Axis network cameras ("edge storage"), read directly from
 a USB card reader — no ext4 driver installation, no risk of Windows formatting
 the card.
 
+## Demo
+
+[![Axis SD Card Reader: one-minute demo](docs/media/demo-poster.jpg)](https://github.com/mrdnlabs/axis-sdcard-reader/releases/download/v1.1.1/axis-sd-card-reader-demo.mp4)
+
+**▶ [Watch the one-minute demo](https://github.com/mrdnlabs/axis-sdcard-reader/releases/download/v1.1.1/axis-sd-card-reader-demo.mp4)**
+(MP4, 1080p). The video itself is made in JavaScript: the app window is rebuilt
+from the real XAML, the camera footage is synthetic, and the soundtrack is
+generated with Web Audio. Source in [`demo/`](demo/); `node demo/render.mjs`
+rebuilds it.
+
 ## Why
 
 Axis cameras format SD cards as **ext4**, which Windows cannot read. Worse,

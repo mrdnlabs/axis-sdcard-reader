@@ -20,10 +20,10 @@
     against — points at a real directory containing them. Verified on hardware.
 
 .EXAMPLE
-    pwsh tools/publish.ps1 -Version 1.1.0
+    pwsh tools/publish.ps1 -Version 1.1.1
 #>
 param(
-    [string]$Version = "1.1.0",
+    [string]$Version = "1.1.1",
     [string]$Configuration = "Release"
 )
 $ErrorActionPreference = "Stop"

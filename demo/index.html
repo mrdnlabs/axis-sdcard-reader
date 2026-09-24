@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Axis SD Card Reader — Demo</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Brand mark, geometry copied verbatim from MainWindow.xaml's LogoMark (microSD + gold pins + play). -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <linearGradient id="lgCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3F7BF2"/><stop offset="1" stop-color="#1B4FD0"/>
+    </linearGradient>
+    <symbol id="logoMark" viewBox="0 0 20 26">
+      <path d="M7,0.75 L19.25,0.75 L19.25,25.25 L0.75,25.25 L0.75,7 Z" fill="url(#lgCard)"/>
+      <rect x="3.2" y="20.2" width="1.7" height="3.4" rx=".5" fill="#F4C65A"/>
+      <rect x="6.5" y="20.2" width="1.7" height="3.4" rx=".5" fill="#F4C65A"/>
+      <rect x="9.8" y="20.2" width="1.7" height="3.4" rx=".5" fill="#F4C65A"/>
+      <rect x="13.1" y="20.2" width="1.7" height="3.4" rx=".5" fill="#F4C65A"/>
+      <path d="M8,8.5 L8,16 L14.5,12.25 Z" fill="#fff"/>
+    </symbol>
+    <symbol id="caret" viewBox="0 0 6 8"><path d="M0,0 L6,4 L0,8 Z"/></symbol>
+  </defs>
+</svg>
+
+<div id="stage">
+  <canvas id="bg" width="1920" height="1080"></canvas>
+
+  <!-- ===================== intro (problem) ===================== -->
+  <div class="layer" id="intro">
+    <svg class="sd" id="sdCard" viewBox="0 0 20 26">
+      <path d="M7,0.75 L19.25,0.75 L19.25,25.25 L0.75,25.25 L0.75,7 Z" fill="url(#lgCard)"/>
+      <rect x="3.2" y="20.2" width="1.7" height="3.4" rx=".5" fill="#F4C65A"/>
+      <rect x="6.5" y="20.2" width="1.7" height="3.4" rx=".5" fill="#F4C65A"/>
+      <rect x="9.8" y="20.2" width="1.7" height="3.4" rx=".5" fill="#F4C65A"/>
+      <rect x="13.1" y="20.2" width="1.7" height="3.4" rx=".5" fill="#F4C65A"/>
+      <text x="10" y="11.2" text-anchor="middle" font-family="Segoe UI" font-weight="700" font-size="3.4" fill="#fff">microSD</text>
+      <text x="10" y="15.6" text-anchor="middle" font-family="Consolas" font-weight="700" font-size="2.6" fill="#cfe0ff">ext4</text>
+      <path id="sdShine" d="M7,0.75 L19.25,0.75 L19.25,25.25 L0.75,25.25 L0.75,7 Z" fill="url(#lgShine)" opacity="0"/>
+      <defs>
+        <linearGradient id="lgShine" x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
+          <stop id="shA" offset="0" stop-color="#fff" stop-opacity="0"/>
+          <stop id="shB" offset=".5" stop-color="#fff" stop-opacity=".45"/>
+          <stop id="shC" offset="1" stop-color="#fff" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+    </svg>
+    <div class="drive" id="drive">
+      <div class="ico mdl">&#xEDA2;</div>
+      <div><b>USB Drive (E:)</b><span id="driveSub">Unreadable file system</span></div>
+    </div>
+    <div class="w11" id="fmtDlg" style="width:560px">
+      <div class="w11Title">Microsoft Windows<span class="x">&#xE8BB;</span></div>
+      <div class="w11Body">
+        <svg class="w11Icon" viewBox="0 0 32 32"><path d="M16 3 L30 28 H2 Z" fill="#f7c948" stroke="#b58b00" stroke-width="1"/><rect x="14.8" y="11" width="2.4" height="9" rx="1" fill="#1a1a1a"/><circle cx="16" cy="23.6" r="1.5" fill="#1a1a1a"/></svg>
+        <div>You need to format the disk in drive E: before you can use it.<br><br>Do you want to format it?</div>
+      </div>
+      <div class="w11Foot"><div class="w11Btn primary" id="fmtBtn">Format disk</div><div class="w11Btn">Cancel</div></div>
+    </div>
+  </div>
+
+  <!-- ===================== title card ===================== -->
+  <div class="layer title" id="titleCard" style="top:300px">
+    <svg class="logoBig" viewBox="0 0 20 26"><use href="#logoMark"/></svg>
+    <h1>Axis SD Card Reader</h1>
+    <p>Browse, play &amp; export Axis camera SD cards — <em>safely</em>, on Windows.</p>
+  </div>
+
+  <!-- ===================== the app ===================== -->
+  <div id="winWrap">
+    <div class="win" id="win">
+      <div class="titlebar">
+        <div class="tbLogo"><svg class="logo" viewBox="0 0 20 26"><use href="#logoMark"/></svg></div>
+        <div class="tbTitle">Axis SD Card Reader</div>
+        <div class="caps"><span class="cap mdl">&#xE921;</span><span class="cap mdl">&#xE922;</span><span class="cap mdl">&#xE8BB;</span></div>
+      </div>
+
+      <div class="toolbar" id="toolbar">
+        <div class="cardIco"><svg class="logo" viewBox="0 0 20 26"><use href="#logoMark"/></svg></div>
+        <div class="cardText"><div class="cardTitle" id="cardTitle"></div><div class="cardSub" id="cardSub"></div></div>
+        <div class="trust" id="trust">
+          <span class="mdl trustIco">&#xE72E;</span>
+          <div><div class="trustHead" id="trustHead"></div><div class="trustDetail" id="trustDetail"></div></div>
+        </div>
+        <div class="search">Search cameras &amp; times…</div>
+        <div class="exportBtn disabled" id="exportBtn"><span class="mdl">&#xE898;</span><b>Export</b></div>
+      </div>
+
+      <div class="body">
+        <div class="cardview" id="cardview">
+          <aside class="sidebar">
+            <div class="sbHead"><b>RECORDINGS BY CAMERA</b><span id="camCount"></span></div>
+            <div class="sbList" id="tree"></div>
+            <div class="sbFoot">Recorded footage spans<br><b id="footSpan"></b></div>
+          </aside>
+          <section class="main">
+            <div class="np">
+              <span class="npDot"></span><span class="npCam" id="npCam"></span><span class="npModel" id="npModel"></span>
+              <span class="npDiv"></span><span class="npDate" id="npDate"></span><span class="npSeg" id="npSeg"></span>
+            </div>
+            <div class="videoRow">
+              <div class="videoBox" id="videoBox"><canvas id="video" width="2000" height="888"></canvas></div>
+            </div>
+            <div class="tl">
+              <div class="tlA">
+                <span class="tlTitle">TIMELINE</span><span class="tlWin mono" id="tlWin"></span>
+                <div class="legend" id="legend">
+                  <div class="lg"><i style="background:var(--RecContinuous)"></i>Continuous</div>
+                  <div class="lg"><i style="background:var(--RecEvent)"></i>Motion</div>
+                  <div class="lg manual"><i style="background:var(--RecManual)"></i>Manual</div>
+                  <div class="lg" id="lgExport"><i style="background:var(--Sel)"></i>Export range</div>
+                </div>
+                <div class="zoomBox"><span class="step" id="zoomOut">&#x2212;</span><span class="spanLbl mono" id="spanLbl"></span><span class="step" id="zoomIn">+</span></div>
+                <div class="fullDay" id="fullDay">Full day</div>
+              </div>
+              <canvas class="ov" id="ov"></canvas>
+              <canvas class="det" id="det"></canvas>
+              <div class="transport">
+                <div class="round mdl" id="prevBtn">&#xE892;</div>
+                <div class="play" id="playBtn"><span class="mdl" id="playGlyph"></span></div>
+                <div class="round mdl">&#xE893;</div>
+                <div class="clockBox">
+                  <div><div class="clock mono" id="clock"></div><div class="clockSub" id="clockSub"></div></div>
+                  <div class="seeking" id="seeking">
+                    <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="none" stroke="var(--Border2)" stroke-width="2"/>
+                      <circle id="seekArc" cx="8" cy="8" r="7" fill="none" stroke="var(--Accent)" stroke-width="2" stroke-dasharray="8 100" stroke-linecap="round" transform="rotate(0 8 8)"/></svg>
+                    Loading…
+                  </div>
+                </div>
+                <div class="speed mono" id="speed"><span>0.5×</span><span>1×</span><span>2×</span><span>4×</span><span>8×</span></div>
+                <div class="round mdl" style="margin-right:16px;font-size:14px">&#xE767;</div>
+                <div class="tpDiv"></div>
+                <div class="tbtn" id="markIn"><svg viewBox="0 0 8 12"><path d="M0,0 L8,6 L0,12 Z"/></svg>Mark in</div>
+                <div class="tbtn" id="markOut">Mark out<svg viewBox="0 0 8 12"><path d="M8,0 L0,6 L8,12 Z"/></svg></div>
+                <span class="selLbl" id="selLbl"></span>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="waiting" id="waiting">
+          <div class="waitInner">
+            <div class="waitTile"><svg class="logo" viewBox="0 0 20 26"><use href="#logoMark"/></svg></div>
+            <div class="waitMsg" id="waitMsg"></div>
+            <div class="waitBtns"><div class="tbtn">Scan again</div><div class="tbtn">Open image…</div></div>
+          </div>
+        </div>
+        <div class="scrim" id="busy"><div class="busyBox" id="busyText"></div></div>
+      </div>
+
+      <div class="status">
+        <span class="stDot"></span><span id="mountLbl"></span>
+        <div class="stRight"><span id="recIdx"></span><span>Index complete</span><span class="mdl">&#xE706;</span></div>
+      </div>
+
+      <!-- export dialog -->
+      <div class="scrim" id="exportDlg">
+        <div class="xdlg">
+          <div class="xdHead"><b>Export footage</b><span>A copy is written to your PC. The card is never modified.</span></div>
+          <div class="xdBody">
+            <div class="xdCols">
+              <div><div class="xdLbl">CAMERA</div><div class="xdV" id="xdCam"></div><div class="xdS" id="xdModel"></div></div>
+              <div><div class="xdLbl">RANGE</div><div class="xdV mono" id="xdRange"></div><div class="xdS" id="xdDur"></div></div>
+            </div>
+            <div class="xdLbl" style="margin-bottom:0">FORMAT</div>
+            <div class="fmts">
+              <div class="fmt on" id="fmtMp4"><b>MP4</b><span>remux · plays widely</span></div>
+              <div class="fmt" id="fmtMkv"><b>MKV</b><span>original streams</span></div>
+            </div>
+            <div class="xdNote"><span class="mdl">&#xE73E;</span>Export preserves original quality and metadata for evidentiary use.</div>
+          </div>
+          <div class="xdFoot"><div class="tbtn">Cancel</div><div class="xdGo" id="xdGo">Export video</div></div>
+        </div>
+      </div>
+
+      <!-- boot / mount + index overlay -->
+      <div class="boot" id="boot">
+        <div class="bootInner">
+          <div class="bootTile"><div class="ring" id="bootRing"></div><div class="tile"><svg class="logo" viewBox="0 0 20 26"><use href="#logoMark"/></svg></div></div>
+          <div class="bootTitle">Axis SD Card Reader</div>
+          <div class="bootSub">Secure evidence viewer</div>
+          <div class="bootStage" id="bootStage">
+            <div class="ind">
+              <svg class="spin" id="bootSpin" viewBox="0 0 16 16"><path d="M 8,1.5 A 6.5,6.5 0 0 1 14.5,8" fill="none" stroke="var(--Accent)" stroke-width="2" stroke-linecap="round"/></svg>
+              <div class="done mdl">&#xE73E;</div>
+            </div>
+            <span id="bootLabel"></span>
+          </div>
+          <div class="bar"><i id="bootBar"></i></div>
+          <div class="bootRow mono"><span id="bootDetail"></span><span id="bootPct"></span></div>
+          <div class="bootTrust"><span class="mdl">&#xE72E;</span>Opened read-only — nothing will be written to the card</div>
+          <div class="bootFoot" id="bootFoot"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- passphrase dialog: its own borderless window, centred on the app (WindowStartupLocation=CenterOwner) -->
+    <div class="pp" id="pp" style="left:500px;top:318px">
+      <div class="ppHead">
+        <div class="ppIco mdl">&#xE72E;</div>
+        <div><div class="ppTitle">This SD card is encrypted</div><div class="ppSub" id="ppSub"></div></div>
+      </div>
+      <div class="ppText">Enter the camera's SD card encryption passphrase to unlock and read it. The card is never modified.</div>
+      <div class="ppField"><span id="ppDots"></span><span class="caret" id="ppCaret"></span></div>
+      <div class="ppBtns"><div class="ppCancel">Cancel</div><div class="ppOk" id="ppOk">Unlock</div></div>
+    </div>
+
+    <!-- Win32 MessageBox (light, as Windows draws it even in a dark app) -->
+    <div class="w11" id="msgBox" style="width:452px;left:494px;top:330px">
+      <div class="w11Title">Export complete<span class="x">&#xE8BB;</span></div>
+      <div class="w11Body" style="padding-top:18px">
+        <svg class="w11Icon" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="#005fb8"/><rect x="14.6" y="13" width="2.8" height="11" rx="1.2" fill="#fff"/><circle cx="16" cy="8.6" r="1.8" fill="#fff"/></svg>
+        <div id="msgText"></div>
+      </div>
+      <div class="w11Foot" style="padding:14px 24px"><div class="w11Btn primary" id="msgOk" style="min-width:96px">OK</div></div>
+    </div>
+
+    <!-- cursor + click ripples live in window space so they zoom with the "screen recording" -->
+    <div id="ripples"></div>
+    <svg class="cursor" id="cursor" viewBox="0 0 20 30">
+      <path d="M1.5,1.5 L1.5,23.5 L7,18.3 L10.6,26.8 L14.2,25.3 L10.7,17.1 L18.2,17.1 Z" fill="#fff" stroke="#000" stroke-width="1.4" stroke-linejoin="round"/>
+    </svg>
+  </div>
+
+  <div class="layer" id="annot"></div>
+  <div class="topScrim" id="topScrim"></div>
+  <div class="caption" id="caption">
+    <div class="k"><i class="kbar" id="capKBar"></i><span id="capKT"></span></div>
+    <div class="h" id="capH"></div><div class="s" id="capS"></div>
+  </div>
+
+  <!-- ===================== features + end card ===================== -->
+  <div class="layer" id="features"></div>
+  <div class="layer title end" id="endCard" style="top:262px">
+    <svg class="logoBig" viewBox="0 0 20 26"><use href="#logoMark"/></svg>
+    <h1>Axis SD Card Reader</h1>
+    <div class="url"><span class="mdl">&#xE71B;</span>github.com/mrdnlabs/axis-sdcard-reader</div>
+    <div class="meta">v1.1.1 &nbsp;·&nbsp; Windows 10 &amp; 11 &nbsp;·&nbsp; Free &amp; open source (MIT)</div>
+    <div class="fine">Independent open-source project. Not affiliated with or endorsed by Axis Communications AB.</div>
+  </div>
+
+  <div class="layer" id="fade" style="background:#000"></div>
+</div>
+
+<div id="controls"><button id="btnPlay">Pause</button><span id="tRead" class="mono">0:00</span><div class="track" id="track"><i id="trackFill"></i></div></div>
+<div id="startOverlay"><div>▶&nbsp; Play demo (with sound)</div></div>
+
+<script src="music.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
