@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0-windows7.0": {
+      "CommunityToolkit.Mvvm": {
+        "type": "Direct",
+        "requested": "[8.4.2, )",
+        "resolved": "8.4.2",
+        "contentHash": "WadCzGEc2U+3e20avRLng4qNtt4zoOGWrdUISqJWrHe3/FSnrYjuM5Sb4yQb09LhkBXrrI4Zt3dLKgRMbItsrg=="
+      },
+      "LibVLCSharp.WPF": {
+        "type": "Direct",
+        "requested": "[3.10.2, )",
+        "resolved": "3.10.2",
+        "contentHash": "jV7ThQIwaQxuLPLNWb1z7+qOGh6ctg/lBF5hVPfu+s+xI5HvtFEvCiYb8a88rEEd/g5WI/Llhy7ipeicAL5gsw==",
+        "dependencies": {
+          "LibVLCSharp": "3.10.2"
+        }
+      },
+      "VideoLAN.LibVLC.Windows": {
+        "type": "Direct",
+        "requested": "[3.0.24, )",
+        "resolved": "3.0.24",
+        "contentHash": "U8SHuJr8eAC3x4+gEtOJD2heReo0tTWP3v21NunYNTzjmHpVp7qELs8phohqazxHMkaSIN8LufdIpAhldiLL/A=="
+      },
+      "LibVLCSharp": {
+        "type": "Transitive",
+        "resolved": "3.10.2",
+        "contentHash": "WNLHBIK5QcOH0kNGBGupKC9Ds3hksPthHyp6ueE8zG5Hy/6EBwAU0BbMqukBCdLatCOY+V9DYHDwSVSXSmPGSA=="
+      },
+      "LTRData.DiscUtils.Core": {
+        "type": "Transitive",
+        "resolved": "1.0.91",
+        "contentHash": "CLIlc+K9kP7BJjLIrdd29tWBh53uIqKsHjT/7Oigep1HcoODeJBTti7Cdes+QmIGPHcGCkWnqNeWMkHeGz7OSw==",
+        "dependencies": {
+          "LTRData.DiscUtils.Streams": "1.0.91"
+        }
+      },
+      "LTRData.DiscUtils.Streams": {
+        "type": "Transitive",
+        "resolved": "1.0.91",
+        "contentHash": "bjT45BWrzr9pYEjH9yp9N1PcjdYmY9QggVsjyviXXKCN9fcBxHqnAd+3AoEEUsbR8ZL8Gwa/HAPd05pwLEBN3Q==",
+        "dependencies": {
+          "LTRData.Extensions": "1.0.24"
+        }
+      },
+      "LTRData.Extensions": {
+        "type": "Transitive",
+        "resolved": "1.0.24",
+        "contentHash": "Tmkv948Mxrw7NO4gxNKvB9VDUMzcH1pv4TC07BWSFEsYTpc7H01bIstpclnDXQoKahrgGqrxo8VqE6BmK/9fug=="
+      },
+      "axissdreader.core": {
+        "type": "Project",
+        "dependencies": {
+          "LTRData.DiscUtils.Core": "[1.0.91, )"
+        }
+      }
+    },
+    "net10.0-windows7.0/win-x64": {}
+  }
+}

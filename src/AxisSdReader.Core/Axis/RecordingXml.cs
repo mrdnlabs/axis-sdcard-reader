@@ -1,6 +1,9 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Xml;
 using System.Xml.Linq;
-using DiscUtils;
+using AxisSdReader.Core.Ext4;
 
 namespace AxisSdReader.Core.Axis;
 
@@ -46,9 +49,14 @@ public sealed record RecordingBlockXml(
 /// <summary>Defensive parsers for the camera-written XML metadata files.</summary>
 public static class RecordingXml
 {
-    public static RecordingInfoXml? TryParseRecordingInfo(DiscFileSystem fs, string path)
+    /// <summary>The recording.xml with inode <paramref name="inode"/>, or null.</summary>
+    public static RecordingInfoXml? TryParseRecordingInfo(Ext4Volume volume, long inode) => TryParseRecordingInfo(volume, inode, out _);
+
+    /// <summary>The recording.xml with inode <paramref name="inode"/>, or null; <paramref name="cost"/> is what reading it
+    /// took in bytes (its map and its contents), even when it fails.</summary>
+    public static RecordingInfoXml? TryParseRecordingInfo(Ext4Volume volume, long inode, out long cost)
     {
-        var root = TryLoad(fs, path);
+        var root = TryLoad(volume, inode, out cost);
         if (root is null || root.Name.LocalName != "Recording")
         {
             return null;
@@ -60,44 +68,103 @@ public static class RecordingXml
         var custom = root.Element("CustomAttributes");
 
         return new RecordingInfoXml(
-            root.Attribute("RecordingToken")?.Value,
+            Short(root.Attribute("RecordingToken")?.Value),
             ParseTime(root.Element("StartTime")?.Value),
-            root.Element("SourceToken")?.Value,
-            video?.Element("Encoding")?.Value,
+            CanonicalSource(root.Element("SourceToken")?.Value),
+            Short(video?.Element("Encoding")?.Value),
             ParseInt(video?.Element("Width")?.Value),
             ParseInt(video?.Element("Height")?.Value),
             ParseDouble(video?.Element("Framerate")?.Value),
-            custom?.Element("TriggerType")?.Value,
-            custom?.Element("TriggerName")?.Value,
-            custom?.Element("TriggerTrigger")?.Value);
+            Short(custom?.Element("TriggerType")?.Value),
+            Short(custom?.Element("TriggerName")?.Value),
+            Short(custom?.Element("TriggerTrigger")?.Value));
     }
 
-    public static RecordingBlockXml? TryParseBlock(DiscFileSystem fs, string path)
+    /// <summary>The longest card-written text value kept; real values are a few dozen characters.</summary>
+    public const int MaxTextLength = 256;
+
+    /// <summary>
+    /// A source token as the rest of the app may use it. Cameras number their video sources ("1", "2", ...), and
+    /// the token travels on into the UI, agent replies and exported file names, so anything other than a short
+    /// plain token (letters, digits, '_', '-', '.'; at most 16) is replaced by a stand-in derived from it: stable
+    /// across recordings and runs, so a camera's recordings still group by source.
+    /// </summary>
+    public static string? CanonicalSource(string? token)
     {
-        var root = TryLoad(fs, path);
+        var trimmed = token?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return null;
+        }
+
+        if (trimmed.Length <= 16 && trimmed.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.'))
+        {
+            return trimmed;
+        }
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(trimmed));
+        return "src-" + Convert.ToHexString(hash, 0, 4).ToLowerInvariant();
+    }
+
+    /// <summary>Card text, trimmed and cut to <see cref="MaxTextLength"/>: bounded wherever it is shown or matched.</summary>
+    private static string? Short(string? value) => Short(value, MaxTextLength);
+
+    /// <summary>The largest XML file read from a card (real ones are about a kilobyte).</summary>
+    public const long MaxFileBytes = 64 * 1024;
+
+    /// <summary>The chunk sidecar with inode <paramref name="inode"/>, or null; <paramref name="cost"/> is what reading it
+    /// took in bytes (its map and its contents), even when it fails. Only the times and a short status are kept (a
+    /// recording holds hundreds of thousands of these).</summary>
+    public static RecordingBlockXml? TryParseBlock(Ext4Volume volume, long inode, out long cost)
+    {
+        var root = TryLoad(volume, inode, out cost);
         if (root is null || root.Name.LocalName != "RecordingBlock")
         {
             return null;
         }
 
+        var status = root.Element("Status")?.Value.Trim();
         return new RecordingBlockXml(
-            root.Attribute("RecordingBlockToken")?.Value,
+            null,
             ParseTime(root.Element("StartTime")?.Value),
             ParseTime(root.Element("StopTime")?.Value),
-            root.Element("Status")?.Value);
+            string.Equals(status, "Complete", StringComparison.OrdinalIgnoreCase) ? "Complete" : Short(status, 32));
     }
 
-    private static XElement? TryLoad(DiscFileSystem fs, string path)
+    /// <summary>Card text, trimmed and cut to <paramref name="max"/> characters.</summary>
+    private static string? Short(string? value, int max)
     {
+        var trimmed = value?.Trim();
+        return string.IsNullOrEmpty(trimmed) ? null : trimmed.Length > max ? trimmed[..max] : trimmed;
+    }
+
+    private static XElement? TryLoad(Ext4Volume volume, long inode, out long cost)
+    {
+        cost = 1024; // its inode, at least
         try
         {
-            if (!fs.FileExists(path) || fs.GetFileLength(path) > 1024 * 1024)
+            if (volume.FileLength(inode) is not (>= 0 and <= MaxFileBytes and var length))
             {
                 return null;
             }
 
-            using var stream = fs.OpenFile(path, FileMode.Open, FileAccess.Read);
-            return XDocument.Load(stream).Root;
+            var file = volume.OpenFile(inode, out var mapCost);
+            cost = mapCost + Math.Max(length, 1024);
+            if (file is null)
+            {
+                return null;
+            }
+
+            using var stream = file;
+            // No DTDs: an entity-expansion document could otherwise inflate a 1 MB file ~10x per parse.
+            using var reader = XmlReader.Create(stream, new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit,
+                XmlResolver = null,
+                MaxCharactersInDocument = 2 * MaxFileBytes,
+                MaxCharactersFromEntities = 0,
+            });
+            return XDocument.Load(reader).Root;
         }
         catch
         {

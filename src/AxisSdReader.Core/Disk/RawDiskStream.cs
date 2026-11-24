@@ -193,7 +193,9 @@ public sealed class RawDiskStream : Stream
             return 512;
         }
 
+        // A reader reports this itself: only a power of two between 512 and 4096 is believed (anything else would
+        // size every read's buffer, or overflow the alignment arithmetic).
         var bytesPerSector = BinaryPrimitives.ReadInt32LittleEndian(output.AsSpan(20));
-        return bytesPerSector > 0 ? bytesPerSector : 512;
+        return bytesPerSector is 512 or 1024 or 2048 or 4096 ? bytesPerSector : 512;
     }
 }

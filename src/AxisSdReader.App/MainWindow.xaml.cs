@@ -51,6 +51,10 @@ public partial class MainWindow : Window
             return;
         }
 
+        // VLC recreates its video windows after every stop: forget handles that no longer exist, so the set
+        // doesn't grow for the whole session and a recycled handle value is treated as the new window it is.
+        _blackenedWindows.RemoveWhere(h => !IsWindow(h));
+
         EnumChildWindows(host, (h, _) =>
         {
             var sb = new StringBuilder(64);
@@ -70,7 +74,13 @@ public partial class MainWindow : Window
     private nint VideoSubclassProc(nint hWnd, uint msg, nint wParam, nint lParam, nint idSubclass, nint refData)
     {
         const uint WmEraseBkgnd = 0x0014;
-        if (msg == WmEraseBkgnd)
+        const uint WmNcDestroy = 0x0082;
+        if (msg == WmNcDestroy)
+        {
+            // Unhook before the window goes away (the documented subclassing contract).
+            RemoveWindowSubclass(hWnd, _videoSubclass!, idSubclass);
+        }
+        else if (msg == WmEraseBkgnd)
         {
             GetClientRect(hWnd, out var rc);
             FillRect(wParam, ref rc, GetStockObject(BlackBrush)); // wParam is the device context
@@ -113,6 +123,12 @@ public partial class MainWindow : Window
 
     [DllImport("comctl32.dll")]
     private static extern nint DefSubclassProc(nint hwnd, uint msg, nint wParam, nint lParam);
+
+    [DllImport("comctl32.dll")]
+    private static extern bool RemoveWindowSubclass(nint hwnd, SubclassProc callback, nint idSubclass);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(nint hwnd);
 
     // Keep a maximized borderless window from covering the taskbar.
     private void OnSourceInitialized(object? sender, EventArgs e)

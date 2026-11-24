@@ -5,25 +5,47 @@ on:
     branches: [ master ]
   pull_request:
 
+# Least privilege: the job only reads the repository.
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: 1
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
 jobs:
   build-test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up .NET 8
-        uses: actions/setup-dotnet@v4
+      # Actions are pinned to commit SHAs (tags can be moved); the comment says which release.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          dotnet-version: '8.0.x'
+          persist-credentials: false
 
-      - name: Restore
-        run: dotnet restore
+      - name: Set up .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '10.0.x'
+
+      # ContinuousIntegrationBuild: restore in locked mode (every package must match packages.lock.json, content
+      # hashes included) and fail on known-vulnerable packages of moderate severity or worse.
+      - name: Restore (locked, audited)
+        run: dotnet restore -p:ContinuousIntegrationBuild=true
 
       - name: Build (Release)
-        run: dotnet build --configuration Release --no-restore
+        run: dotnet build --configuration Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      # The native launcher (AxisSdReader.exe): the app's elevated entry point and .NET host.
+      - name: Build launcher
+        shell: pwsh
+        run: ./src/AxisSdReader.Launcher/build.ps1 -Version 0.0.0 -OutDir build/launcher
 
       # The ext4 card-image fixture is generated with WSL + e2fsprogs, which hosted runners don't have, so
-      # those tests run locally. CI gates the WSL-free suites: LUKS crypto (incl. hostile-header fuzz) and
-      # MKV untrusted-input parsing — the security-critical paths.
-      - name: Test (WSL-free suites)
-        run: dotnet test --configuration Release --no-build --filter "FullyQualifiedName~LuksTests|FullyQualifiedName~MkvMetadataReaderTests"
+      # those tests (and the FFmpeg-backed ones) run locally. CI gates every suite that needs neither: LUKS
+      # crypto (incl. hostile-header fuzz), MKV untrusted-input parsing, recording IDs/types, the timeline
+      # model, the loopback media server, the card I/O gate, guarded file writes, process hardening, export
+      # argument hardening, the agent pipe, and partition/superblock bounds.
+      - name: Test (fixture-free suites)
+        run: >-
+          dotnet test --configuration Release --no-build --filter
+          "FullyQualifiedName~LuksTests|FullyQualifiedName~MkvMetadataReaderTests|FullyQualifiedName~RecordingIdTests|FullyQualifiedName~RecordingTypeClassifierTests|FullyQualifiedName~TimeAxisTests|FullyQualifiedName~TimeSegmentTests|FullyQualifiedName~CardCatalogTests|FullyQualifiedName~LocalMediaServerTests|FullyQualifiedName~CardIoGateTests|FullyQualifiedName~GuardedFileTests|FullyQualifiedName~ProcessHardeningTests|FullyQualifiedName~FfmpegArgumentTests|FullyQualifiedName~AgentPipeTests|FullyQualifiedName~CardLayoutTests"

@@ -1,10 +1,12 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 
 namespace AxisSdReader.App;
 
-/// <summary>Modal prompt for a LUKS card's passphrase. The passphrase is returned to the caller as a
-/// mutable char[] (so the caller can zero it after use) and is never stored by this dialog. Note WPF's
-/// PasswordBox keeps its own internal string that cannot be wiped, so erasure is best-effort.</summary>
+/// <summary>Modal prompt for a LUKS card's passphrase. The passphrase is returned to the caller as a mutable
+/// char[] (so the caller can zero it after use) and is never stored by this dialog. It is read out of the
+/// PasswordBox's SecureString directly — never through <c>PasswordBox.Password</c>, which would leave an
+/// immutable string copy on the heap — and the box is cleared afterwards.</summary>
 public partial class PassphraseDialog : Window
 {
     public PassphraseDialog(string cardName, string? error = null)
@@ -18,6 +20,7 @@ public partial class PassphraseDialog : Window
         }
 
         Loaded += (_, _) => PasswordInput.Focus();
+        Closed += (_, _) => PasswordInput.Clear();
     }
 
     /// <summary>The entered passphrase (valid only when the dialog returned true).</summary>
@@ -33,9 +36,27 @@ public partial class PassphraseDialog : Window
 
     private void OnOk(object sender, RoutedEventArgs e)
     {
-        Passphrase = PasswordInput.Password.ToCharArray();
+        using var secure = PasswordInput.SecurePassword; // a copy; disposed (wiped) here
+        var buffer = Marshal.SecureStringToGlobalAllocUnicode(secure);
+        try
+        {
+            // Pinned: the garbage collector never moves (and so never copies) it before the caller zeroes it.
+            var chars = GC.AllocateUninitializedArray<char>(secure.Length, pinned: true);
+            Marshal.Copy(buffer, chars, 0, chars.Length);
+            Passphrase = chars;
+        }
+        finally
+        {
+            Marshal.ZeroFreeGlobalAllocUnicode(buffer);
+        }
+
+        PasswordInput.Clear();
         DialogResult = true;
     }
 
-    private void OnCancel(object sender, RoutedEventArgs e) => DialogResult = false;
+    private void OnCancel(object sender, RoutedEventArgs e)
+    {
+        PasswordInput.Clear();
+        DialogResult = false;
+    }
 }

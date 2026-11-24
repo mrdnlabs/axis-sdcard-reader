@@ -69,13 +69,7 @@ internal sealed class XtsDecryptingStream : SparseStream
         {
             ReadCipher(regionStart, cipherBuf.AsSpan(0, regionBytes));
 
-            for (var i = 0; i < sectorCount; i++)
-            {
-                _xts.DecryptSector(
-                    (ulong)(firstSector + i),
-                    cipherBuf.AsSpan(i * SectorSize, SectorSize),
-                    plainBuf.AsSpan(i * SectorSize, SectorSize));
-            }
+            _xts.DecryptSectors((ulong)firstSector, cipherBuf, 0, plainBuf, 0, sectorCount);
 
             var skip = (int)(_position - regionStart);
             plainBuf.AsSpan(skip, toRead).CopyTo(buffer);
@@ -84,8 +78,9 @@ internal sealed class XtsDecryptingStream : SparseStream
         }
         finally
         {
+            // Cleared on return: the shared pool hands these to any other code next, and one holds decrypted footage.
             ArrayPool<byte>.Shared.Return(cipherBuf);
-            ArrayPool<byte>.Shared.Return(plainBuf);
+            ArrayPool<byte>.Shared.Return(plainBuf, clearArray: true);
         }
     }
 

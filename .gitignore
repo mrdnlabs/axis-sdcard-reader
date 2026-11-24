@@ -17,3 +17,52 @@ src/AxisSdReader.App/ffmpeg/
 
 # Demo video renders (regenerate with: node demo/render.mjs)
 demo/out/
+
+# The demo soundtrack's audio stays local: ElevenLabs' music terms prohibit putting generated music in
+# repositories/libraries.
+demo/sound/**/*.mp3
+demo/sound/**/*.wav
+demo/sound/**/*.m4a
+demo/sound/**/*.zip
+
+# Local secrets (e.g. the ElevenLabs API key read by demo/eleven.mjs) — never commit
+.env
+.env.*
+!.env.example
+
+# Card images and exported footage — never commit (the synthetic test fixture is generated, and ignored above)
+*.img
+*.dd
+*.raw
+*.mp4
+*.mkv
+
+# Diagnostics, logs and build traces (MSBuild binlogs record the whole environment, including tokens)
+*.dmp
+*.binlog
+*.log
+TestResults/
+*.trx
+coverage*.json
+coverage*.xml
+*.coverage
+
+# Signing material
+*.pfx
+*.p12
+*.snk
+*.pvk
+
+# Tooling
+node_modules/
+.idea/
+.vscode/
+launchSettings.json
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Demo soundtrack audio in any other format
+demo/sound/**/*.flac
+demo/sound/**/*.ogg
+demo/sound/**/*.aac
+demo/sound/**/*.opus

@@ -7,14 +7,15 @@ AV1 recording). Cross-checked against the VAPIX Edge Storage documentation.
 
 - MBR partition table, one Linux partition starting at 4 MiB.
 - ext4 filesystem, volume label `Axis`.
-- Filesystem features are readable by LTRData.DiscUtils (verified on real hardware).
+- Filesystem features are readable by the app's own ext4 reader, and by LTRData.DiscUtils, which
+  the tests use to cross-check it (verified on real hardware).
 
 ## Directory layout (modern, AXIS OS 10+)
 
 ```
 /<YYYYMMDD>/                                  date, camera-local time
     /<HH>/                                    hour, camera-local time
-        /<recordingId>/                       e.g. 20260702_190233_3CEA_E827251FFB8D
+        /<recordingId>/                       e.g. 20250114_093000_3CEA_ACCC8E123456
             recording.xml                     ONVIF-style recording metadata
             /<YYYYMMDD_HH>/                   chunk bucket (hour)
                 <YYYYMMDD_HHMMSS_XXXX>.mkv    ~5-minute chunk (timestamp + 4 hex)
@@ -33,9 +34,9 @@ numeric chunk names (`0.mkv`, `1.mkv`, ...). The indexer supports both.
 ## recording.xml
 
 ```xml
-<Recording RecordingToken="20260702_190233_3CEA_E827251FFB8D">
+<Recording RecordingToken="20250114_093000_3CEA_ACCC8E123456">
   <RecordingGroup/> <SourceToken>1</SourceToken>
-  <StartTime>2026-07-03T00:02:33.283555Z</StartTime>
+  <StartTime>2025-01-14T14:30:00.283555Z</StartTime>
   <Track TrackToken="Video"><VideoAttributes>
     <Width>3840</Width> <Height>2160</Height>
     <Framerate>30.00000</Framerate> <Framerate_fraction>30:1</Framerate_fraction>
@@ -79,9 +80,9 @@ when a marked range covers both — tagging each output file with its type.
 ## Chunk sidecar XML
 
 ```xml
-<RecordingBlock RecordingBlockToken="20260702_190233_5B35">
-  <RecordingToken>20260702_190233_3CEA_E827251FFB8D</RecordingToken>
-  <StartTime>2026-07-03T00:02:33.283555Z</StartTime>
+<RecordingBlock RecordingBlockToken="20250114_093000_5B35">
+  <RecordingToken>20250114_093000_3CEA_ACCC8E123456</RecordingToken>
+  <StartTime>2025-01-14T14:30:00.283555Z</StartTime>
   <StopTime>2026-07-03T00:07:34.882442Z</StopTime>   <!-- absent while recording -->
   <Status>Complete</Status>                          <!-- or "Recording" -->
 </RecordingBlock>

@@ -2,20 +2,37 @@
 
   <!-- Shared identity + release hardening applied to every project in the solution. -->
   <PropertyGroup>
-    <Version>1.1.1</Version>
-    <AssemblyVersion>1.1.1.0</AssemblyVersion>
-    <FileVersion>1.1.1.0</FileVersion>
-    <InformationalVersion>1.1.1</InformationalVersion>
+    <Version>1.2.0</Version>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
+    <InformationalVersion>1.2.0</InformationalVersion>
     <Product>Axis SD Card Reader</Product>
     <Authors>mrdnlabs</Authors>
     <Copyright>Copyright (c) 2026 mrdnlabs</Copyright>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
 
+  <!-- Supply chain: every package (direct and transitive) is pinned with its content hash in packages.lock.json,
+       and CI restores in locked mode, so a changed or substituted package fails the build. Known-vulnerable
+       packages are reported at restore; in CI (ContinuousIntegrationBuild=true) moderate and worse fail it. -->
+  <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Restored for the RID releases are published for too (publish -r passes it to every project), so the
+         lock files cover the release build. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(ContinuousIntegrationBuild)' == 'true'">
+    <RestoreLockedMode>true</RestoreLockedMode>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1902;NU1903;NU1904</WarningsAsErrors>
+  </PropertyGroup>
+
   <!-- The shipped assemblies drop their PDB in Release builds, so exception stack traces carry method
        names without absolute build-machine source paths (log hygiene) and no .pdb leaks into the package.
        CardProbe (diagnostics) and the test project keep symbols. Debug keeps full symbols everywhere. -->
-  <PropertyGroup Condition="'$(Configuration)' == 'Release' And ('$(MSBuildProjectName)' == 'AxisSdReader.App' Or '$(MSBuildProjectName)' == 'AxisSdReader.Core')">
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' And ('$(MSBuildProjectName)' == 'AxisSdReader.App' Or '$(MSBuildProjectName)' == 'AxisSdReader.Core' Or '$(MSBuildProjectName)' == 'AxisSdReader.Mcp')">
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>

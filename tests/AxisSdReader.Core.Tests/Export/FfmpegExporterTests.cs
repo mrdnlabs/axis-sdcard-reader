@@ -23,7 +23,7 @@ public class FfmpegExporterTests
 
         using var reader = CardReader.OpenImage(_fixture.ImagePath);
         var fs = reader.FileSystem!;
-        var card = AxisCardIndexer.Index(fs);
+        var card = AxisCardIndexer.Index(reader);
 
         // The H.264 recording with three ~2s chunks (total ~6s).
         var recording = card.Recordings.Single(r => r.Id.Raw == "20250114_093000_1A2B_ACCC8E123456");
@@ -61,7 +61,7 @@ public class FfmpegExporterTests
 
         using var reader = CardReader.OpenImage(_fixture.ImagePath);
         var fs = reader.FileSystem!;
-        var card = AxisCardIndexer.Index(fs);
+        var card = AxisCardIndexer.Index(reader);
 
         // The AV1 recording — MKV remux must keep the av1 stream.
         var recording = card.Recordings.Single(r => r.Id.Raw == "20250114_101500_77F0_ACCC8E123456");

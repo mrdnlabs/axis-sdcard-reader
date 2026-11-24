@@ -5,7 +5,6 @@ using AxisSdReader.Core;
 using AxisSdReader.Core.Disk;
 using AxisSdReader.Core.Ext4;
 using AxisSdReader.Core.Ext4.Luks;
-using DiscUtils.Ext;
 using DiscUtils.Streams;
 
 // CardProbe: diagnostic harness for validating raw ext4 SD card access.
@@ -21,7 +20,9 @@ using DiscUtils.Streams;
 //   --recordings                 list every recording with its trigger metadata (continuous/motion/manual)
 //                                and dump the raw recording.xml of each distinct trigger type
 //   --pass-prompt                for an encrypted card: prompt (hidden) for the passphrase on stderr
-//   --pass <passphrase>          for an encrypted card: passphrase on the command line (avoid; prefer --pass-prompt)
+//
+// A passphrase is only ever read from that hidden prompt: never from the command line (visible to other
+// processes and kept in shell history), and nothing derived from it is printed.
 
 return args switch
 {
@@ -30,15 +31,16 @@ return args switch
     ["--image", var path, .. var rest] => ProbeImage(path, rest),
     ["--luks", var n] when int.TryParse(n, out var disk) => DumpLuks(RawDiskStream.OpenPhysicalDrive(disk)),
     ["--luks-image", var path] => DumpLuks(File.OpenRead(path)),
-    ["--unlock", var n, var pass] when int.TryParse(n, out var disk) => Unlock(RawDiskStream.OpenPhysicalDrive(disk), pass),
-    ["--unlock-image", var path, var pass] => Unlock(File.OpenRead(path), pass),
+    ["--unlock", var n] when int.TryParse(n, out var disk) => Unlock(RawDiskStream.OpenPhysicalDrive(disk), PromptPassphrase()),
+    ["--unlock-image", var path] => Unlock(File.OpenRead(path), PromptPassphrase()),
     ["--mkv", var path] => ProbeMkv(path),
     ["--echo-pass", .. var rest] => EchoPass(rest),
     _ => Usage(),
 };
 
-// Diagnostic: report the char count + SHA-256 of the passphrase actually received, so command-line
-// escaping of special characters (e.g. '!') can be verified end-to-end without revealing the passphrase.
+// Diagnostic: report how many characters/bytes of passphrase were received, so input of special characters can
+// be checked end-to-end. Deliberately no hash: an unsalted digest of a passphrase pasted into a bug report would
+// allow fast offline guessing that sidesteps LUKS's key stretching.
 static int EchoPass(string[] options)
 {
     var pass = ResolvePassphrase(options);
@@ -49,14 +51,21 @@ static int EchoPass(string[] options)
     }
 
     var utf8 = System.Text.Encoding.UTF8.GetBytes(pass);
-    var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(utf8));
-    Console.WriteLine($"received: chars={pass.Length} utf8bytes={utf8.Length} sha256={sha}");
+    Console.WriteLine($"received: chars={pass.Length} utf8bytes={utf8.Length}");
+    Array.Clear(pass);
+    System.Security.Cryptography.CryptographicOperations.ZeroMemory(utf8);
     return 0;
+}
+
+static char[] PromptPassphrase()
+{
+    Console.Error.Write("SD card passphrase: ");
+    return ReadPasswordHidden();
 }
 
 // Unlocks a LUKS-encrypted card with a passphrase and lists the decrypted ext4 root — an end-to-end
 // validation of the decryption chain. Read-only.
-static int Unlock(Stream deviceStream, string passphrase)
+static int Unlock(Stream deviceStream, char[] passphrase)
 {
     using var raw = deviceStream;
     using var disk = new DiscUtils.Raw.Disk(raw, Ownership.None);
@@ -70,7 +79,8 @@ static int Unlock(Stream deviceStream, string passphrase)
 
     var partition = new SubStream(disk.Content, offset, length);
     var sw = Stopwatch.StartNew();
-    var result = LuksVolume.TryUnlock(partition, passphrase.ToCharArray());
+    var result = LuksVolume.TryUnlock(partition, passphrase);
+    Array.Clear(passphrase);
     Console.WriteLine($"Unlock status: {result.Status}  ({sw.ElapsedMilliseconds} ms)");
     if (result.Detail is not null)
     {
@@ -86,17 +96,19 @@ static int Unlock(Stream deviceStream, string passphrase)
     Console.WriteLine($"Decrypted payload: {plaintext.Length:N0} bytes");
 
     // The decrypted payload IS the ext4 filesystem.
-    using var fs = new ExtFileSystem(plaintext);
-    Console.WriteLine($"ext4 volume label: '{fs.VolumeLabel}'");
-    Console.WriteLine("Root contents:");
-    foreach (var dir in fs.GetDirectories(@"\").OrderBy(d => d))
+    if (Ext4Volume.TryCreate(plaintext, plaintext.Length) is not { } fs)
     {
-        Console.WriteLine($"  {dir.TrimStart('\\')}/");
+        Console.WriteLine("The decrypted payload is not an ext4 filesystem this reader can read.");
+        return 1;
     }
 
-    foreach (var file in fs.GetFiles(@"\").OrderBy(f => f))
+    Console.WriteLine($"ext4 volume label: '{fs.Label}'");
+    Console.WriteLine("Root contents:");
+    foreach (var entry in (fs.ReadDirectory(Ext4Volume.RootInode, out _) ?? []).OrderBy(e => e.Name, StringComparer.Ordinal))
     {
-        Console.WriteLine($"  {file.TrimStart('\\')}  {fs.GetFileLength(file):N0} bytes");
+        Console.WriteLine(entry.Kind == CardEntryKind.Directory
+            ? $"  {entry.Name}/"
+            : $"  {entry.Name}  {fs.FileLength(entry.Inode):N0} bytes");
     }
 
     return 0;
@@ -228,22 +240,21 @@ static int Usage()
 {
     Console.WriteLine("usage: CardProbe [--disk N [--no-guard] | --image path.img] [--tree [depth]] [--dump src dst]...");
     Console.WriteLine("       CardProbe --luks N            describe the LUKS encryption header on disk N (elevated)");
-    Console.WriteLine("       CardProbe --unlock N <pass>   unlock a LUKS card with a passphrase and list ext4 root (elevated)");
+    Console.WriteLine("       CardProbe --unlock N          unlock a LUKS card (prompts for the passphrase) and list ext4 root (elevated)");
     return 2;
 }
 
-// Resolves the LUKS passphrase for an encrypted card: a hidden interactive prompt (--pass-prompt, preferred —
-// keeps the secret off the command line) or a plain --pass argument. Null when neither is given.
+// Resolves the LUKS passphrase for an encrypted card from the hidden interactive prompt (--pass-prompt), which
+// keeps the secret off the command line. Null when not requested.
 static char[]? ResolvePassphrase(string[] options)
 {
-    if (options.Contains("--pass-prompt"))
+    if (options.Contains("--pass"))
     {
-        Console.Error.Write("SD card passphrase: ");
-        return ReadPasswordHidden();
+        Console.Error.WriteLine("--pass is no longer accepted (a passphrase on the command line is visible to other programs); use --pass-prompt.");
+        return null;
     }
 
-    var idx = Array.IndexOf(options, "--pass");
-    return idx >= 0 && idx + 1 < options.Length ? options[idx + 1].ToCharArray() : null;
+    return options.Contains("--pass-prompt") ? PromptPassphrase() : null;
 }
 
 // Reads a line from the console without echoing it (so a passphrase never appears on screen or in a log).
@@ -344,18 +355,24 @@ static int RunExtraOps(CardReader card, string[] options)
                 var depth = i + 1 < options.Length && int.TryParse(options[i + 1], out var d) ? d : 5;
                 Console.WriteLine();
                 Console.WriteLine($"Tree (max depth {depth}):");
-                PrintTree(fs, @"\", depth, "");
+                PrintTree(fs, Ext4Volume.RootInode, depth, "");
                 break;
 
             case "--recordings":
-                DumpRecordings(fs);
+                DumpRecordings(card);
                 break;
 
             case "--dump" when i + 2 < options.Length:
                 var src = options[i + 1];
                 var dst = options[i + 2];
                 i += 2;
-                using (var source = fs.OpenFile(src, FileMode.Open, FileAccess.Read))
+                if (fs.Resolve(src) is not { } inode || fs.OpenFile(inode) is not { } source)
+                {
+                    Console.WriteLine($"{src}: not a readable file");
+                    break;
+                }
+
+                using (source)
                 using (var target = File.Create(dst))
                 {
                     source.CopyTo(target);
@@ -372,9 +389,10 @@ static int RunExtraOps(CardReader card, string[] options)
 // Lists every recording with the trigger metadata that distinguishes continuous / motion / manual, then
 // dumps the raw recording.xml of the first recording of each distinct trigger, so we can read the exact
 // on-card vocabulary the camera writes. Read-only.
-static void DumpRecordings(DiscUtils.DiscFileSystem fs)
+static void DumpRecordings(CardReader opened)
 {
-    var card = AxisSdReader.Core.Axis.AxisCardIndexer.Index(fs);
+    var fs = opened.FileSystem!;
+    var card = AxisSdReader.Core.Axis.AxisCardIndexer.Index(opened);
     Console.WriteLine();
     Console.WriteLine($"=== Recordings ({card.Recordings.Count}) ===");
     Console.WriteLine("  start(local)         src  triggerType     triggerName        chunks  recordingId");
@@ -406,13 +424,13 @@ static void DumpRecordings(DiscUtils.DiscFileSystem fs)
         Console.WriteLine($"--- raw recording.xml for [{combo}]  ({xmlPath}) ---");
         try
         {
-            if (!fs.FileExists(xmlPath))
+            if (fs.Resolve(xmlPath) is not { } inode || fs.OpenFile(inode) is not { } file)
             {
                 Console.WriteLine("(no recording.xml at this path)");
                 continue;
             }
 
-            using var s = fs.OpenFile(xmlPath, FileMode.Open, FileAccess.Read);
+            using var s = file;
             using var reader = new StreamReader(s);
             var text = reader.ReadToEnd();
             Console.WriteLine(text.Length > 4000 ? text[..4000] + "\n…(truncated)" : text);
@@ -424,14 +442,15 @@ static void DumpRecordings(DiscUtils.DiscFileSystem fs)
     }
 }
 
-static void PrintTree(DiscUtils.DiscFileSystem fs, string path, int depthLeft, string indent)
+static void PrintTree(Ext4Volume fs, long folder, int depthLeft, string indent)
 {
     const int maxEntries = 25;
 
-    var files = fs.GetFiles(path).OrderBy(f => f).ToArray();
+    var entries = fs.ReadDirectory(folder, out _) ?? [];
+    var files = entries.Where(e => e.Kind == CardEntryKind.File).OrderBy(e => e.Name, StringComparer.Ordinal).ToArray();
     foreach (var file in files.Take(maxEntries))
     {
-        Console.WriteLine($"{indent}{Path.GetFileName(file)}  {fs.GetFileLength(file):N0}");
+        Console.WriteLine($"{indent}{file.Name}  {fs.FileLength(file.Inode):N0}");
     }
 
     if (files.Length > maxEntries)
@@ -444,16 +463,15 @@ static void PrintTree(DiscUtils.DiscFileSystem fs, string path, int depthLeft, s
         return;
     }
 
-    foreach (var dir in fs.GetDirectories(path).OrderBy(d => d))
+    foreach (var dir in entries.Where(e => e.Kind == CardEntryKind.Directory).OrderBy(e => e.Name, StringComparer.Ordinal))
     {
-        var name = Path.GetFileName(dir.TrimEnd('\\'));
-        if (name == "lost+found")
+        if (dir.Name == "lost+found")
         {
             continue;
         }
 
-        Console.WriteLine($"{indent}{name}/");
-        PrintTree(fs, dir, depthLeft - 1, indent + "    ");
+        Console.WriteLine($"{indent}{dir.Name}/");
+        PrintTree(fs, dir.Inode, depthLeft - 1, indent + "    ");
     }
 }
 
@@ -470,45 +488,44 @@ static int Report(CardReader card, Stopwatch sw)
     Console.WriteLine($"ext4 filesystem at partition {vol.PartitionIndex}, offset {vol.FirstByte:N0}, length {vol.LengthBytes:N0}");
 
     var fs = card.FileSystem!;
-    Console.WriteLine($"Volume label: '{fs.VolumeLabel}'");
+    Console.WriteLine($"Volume label: '{fs.Label}'");
     Console.WriteLine();
     Console.WriteLine("Root contents:");
 
-    foreach (var dir in fs.GetDirectories(@"\").OrderBy(d => d))
+    var root = fs.ReadDirectory(Ext4Volume.RootInode, out _) ?? [];
+    CardDirEntry? firstMkv = null;
+    foreach (var dir in root.Where(e => e.Kind == CardEntryKind.Directory).OrderBy(e => e.Name, StringComparer.Ordinal))
     {
-        var name = dir.TrimStart('\\');
-        var files = fs.GetFiles(dir).ToArray();
-        Console.WriteLine($"  {name}/   ({files.Length} files)");
+        var files = (fs.ReadDirectory(dir.Inode, out _) ?? []).Where(e => e.Kind == CardEntryKind.File).ToArray();
+        Console.WriteLine($"  {dir.Name}/   ({files.Length} files)");
         foreach (var file in files.Take(5))
         {
-            Console.WriteLine($"      {Path.GetFileName(file)}  {fs.GetFileLength(file):N0} bytes");
+            Console.WriteLine($"      {file.Name}  {fs.FileLength(file.Inode):N0} bytes");
         }
 
         if (files.Length > 5)
         {
             Console.WriteLine($"      ... and {files.Length - 5} more");
         }
+
+        firstMkv ??= files.FirstOrDefault(f => f.Name.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase));
     }
 
-    foreach (var file in fs.GetFiles(@"\").OrderBy(f => f))
+    foreach (var file in root.Where(e => e.Kind == CardEntryKind.File).OrderBy(e => e.Name, StringComparer.Ordinal))
     {
-        Console.WriteLine($"  {file.TrimStart('\\')}  {fs.GetFileLength(file):N0} bytes");
+        Console.WriteLine($"  {file.Name}  {fs.FileLength(file.Inode):N0} bytes");
     }
 
     // Read the first bytes of the first MKV found, as a data-path smoke test.
-    var firstMkv = fs.GetDirectories(@"\")
-        .SelectMany(d => fs.GetFiles(d))
-        .FirstOrDefault(f => f.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase));
-
-    if (firstMkv is not null)
+    if (firstMkv is not null && fs.OpenFile(firstMkv.Inode) is { } opened)
     {
         sw.Restart();
-        using var stream = fs.OpenFile(firstMkv, FileMode.Open, FileAccess.Read);
+        using var stream = opened;
         var head = new byte[4];
         stream.ReadExactly(head);
         var ebml = head is [0x1A, 0x45, 0xDF, 0xA3];
         Console.WriteLine();
-        Console.WriteLine($"Read {firstMkv}: first bytes {Convert.ToHexString(head)} " +
+        Console.WriteLine($"Read {firstMkv.Name}: first bytes {Convert.ToHexString(head)} " +
                           $"({(ebml ? "valid EBML/Matroska" : "NOT Matroska!")}, {sw.ElapsedMilliseconds} ms)");
     }
 

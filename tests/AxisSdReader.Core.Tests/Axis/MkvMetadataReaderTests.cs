@@ -117,6 +117,45 @@ public class MkvMetadataReaderTests
         Assert.Null(meta!.Duration);
     }
 
+    [Fact]
+    public void TheDurationScanStopsAtItsDistanceLimit()
+    {
+        // Two clusters 2 MiB apart (a Void element between them). Scanning at most 1 MiB past the first cluster sees
+        // only the first; the result is a lower bound, marked truncated. Unlimited, it reaches the second.
+        byte[] voidId = [0xEC];
+        var mkv = Concat(
+            Elem(Ebml, [0x42, 0x87, 0x81, 0x01]),
+            Elem(Segment, Concat(
+                Elem(SegmentInfo, Elem(TimestampScale, UIntBytes(1_000_000))),
+                Elem(Cluster, Elem(ClusterTimestamp, UIntBytes(1000))),
+                Elem(voidId, new byte[2 << 20]),
+                Elem(Cluster, Elem(ClusterTimestamp, UIntBytes(9000))))));
+
+        var limited = MkvMetadataReader.Read(new MemoryStream(mkv), 1 << 20, CancellationToken.None);
+        Assert.NotNull(limited);
+        Assert.True(limited!.IsTruncated);
+        Assert.InRange(limited.Duration!.Value.TotalSeconds, 0.9, 1.1);
+
+        var full = MkvMetadataReader.Read(new MemoryStream(mkv));
+        Assert.InRange(full!.Duration!.Value.TotalSeconds, 8.9, 9.1);
+    }
+
+    [Fact]
+    public void TheDurationScanStopsWhenCancelled()
+    {
+        // Many small elements: the scan checks for cancellation as it goes.
+        var blocks = Enumerable.Range(0, 20_000).Select(i => Elem(SimpleBlock, [0x81, 0x00, (byte)i, 0x00])).ToArray();
+        var mkv = Concat(
+            Elem(Ebml, [0x42, 0x87, 0x81, 0x01]),
+            Elem(Segment, Concat(
+                Elem(SegmentInfo, Elem(TimestampScale, UIntBytes(1_000_000))),
+                Elem(Cluster, Concat([Elem(ClusterTimestamp, UIntBytes(0)), .. blocks])))));
+
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.Throws<OperationCanceledException>(() => MkvMetadataReader.Read(new MemoryStream(mkv), 1L << 30, cancelled.Token));
+    }
+
     // --- tiny EBML builder ---------------------------------------------------
 
     private static byte[] Elem(byte[] id, byte[] payload) => Concat(id, Vint(payload.Length), payload);

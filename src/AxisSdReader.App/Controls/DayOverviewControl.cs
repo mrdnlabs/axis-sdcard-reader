@@ -4,6 +4,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using AxisSdReader.App.ViewModels;
 using AxisSdReader.Core.Axis;
+using AxisSdReader.Core.Timeline;
 
 namespace AxisSdReader.App.Controls;
 
@@ -22,7 +23,36 @@ public sealed class DayOverviewControl : FrameworkElement
 
     public static readonly DependencyProperty SegmentsSourceProperty = DependencyProperty.Register(
         nameof(SegmentsSource), typeof(IEnumerable), typeof(DayOverviewControl),
-        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, OnSegmentsSourceChanged));
+
+    // Redraw when segments are added/replaced (a refined recording), not only when the playhead next moves.
+    private static void OnSegmentsSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var control = (DayOverviewControl)d;
+        control._drawOrder = null;
+        if (e.OldValue is System.Collections.Specialized.INotifyCollectionChanged oldCollection)
+        {
+            oldCollection.CollectionChanged -= control.OnSegmentsCollectionChanged;
+        }
+
+        if (e.NewValue is System.Collections.Specialized.INotifyCollectionChanged newCollection)
+        {
+            newCollection.CollectionChanged += control.OnSegmentsCollectionChanged;
+        }
+    }
+
+    private void OnSegmentsCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        _drawOrder = null;
+        InvalidateVisual();
+    }
+
+    // The recordings as drawing layers (see TimelineLayers), built once per change to the collection rather than
+    // on every repaint — the playhead repaints many times a second, and a card can hold a great many recordings.
+    // Built lazily: a burst of additions costs one build.
+    private TimelineLayers? _drawOrder;
+
+    private TimelineLayers DrawOrder() => _drawOrder ??= TimelineLayers.Build(SegmentsSource);
 
     public static readonly DependencyProperty CenterSecondsProperty = DependencyProperty.Register(
         nameof(CenterSeconds), typeof(double), typeof(DayOverviewControl),
@@ -133,18 +163,11 @@ public sealed class DayOverviewControl : FrameworkElement
         // kinds are drawn on top where they overlap, matching the detail track.
         if (SegmentsSource is not null)
         {
-            var segs = SegmentsSource.OfType<TimelineSegment>()
-                .Where(s => s.EndSeconds - dayStart >= 0 && s.StartSeconds - dayStart <= day)
-                .OrderBy(s => RecordingTypeClassifier.OverlayPriority(s.Kind));
-            foreach (var segment in segs)
-            {
-                var s = segment.StartSeconds - dayStart;
-                var e = segment.EndSeconds - dayStart;
-                var x1 = Math.Max(0, s) / day * width;
-                var x2 = Math.Min(day, e) / day * width;
-                dc.DrawRoundedRectangle(Theme.RecordingBrush(segment.Kind), null,
-                    new Rect(x1, 4, Math.Max(1.5, x2 - x1), 10), 2, 2);
-            }
+            // Each kind's merged spans, at most one shape per pixel run (see TimelineLayers): bounded work per repaint.
+            DrawOrder().ForEachRun(dayStart, dayStart + day,
+                t => Math.Clamp(t - dayStart, 0, day) / day * width,
+                (kind, x1, x2, _, _) => dc.DrawRoundedRectangle(Theme.RecordingBrush(kind), null,
+                    new Rect(x1, 4, Math.Max(1.5, x2 - x1), 10), 2, 2));
         }
 
         // Export-range mark (thin).

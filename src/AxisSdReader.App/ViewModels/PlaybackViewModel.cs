@@ -4,6 +4,8 @@ using System.Windows.Threading;
 using AxisSdReader.App.Controls;
 using AxisSdReader.App.Services;
 using AxisSdReader.Core.Axis;
+using AxisSdReader.Core.Media;
+using AxisSdReader.Core.Timeline;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibVLCSharp.Shared;
@@ -35,12 +37,25 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
     private bool _switchingStream; // re-entrancy guard for the follow-the-top-band stream switch
     private int _seekVersion;
     private bool _disposed;
+    private CancellationTokenSource? _seekCts;   // cancels a superseded seek's metadata load
+    private int _mediaGeneration;               // bumped on every media swap; stale VLC events are dropped
+    private int _consecutiveErrors;
 
     // Kept so they can be detached in Dispose (LibVLC callbacks otherwise fire after teardown).
     private EventHandler<MediaPlayerTimeChangedEventArgs>? _onTimeChanged;
     private EventHandler<EventArgs>? _onEndReached;
     private EventHandler<EventArgs>? _onPlaying;
     private EventHandler<EventArgs>? _onPaused;
+    private EventHandler<EventArgs>? _onError;
+
+    /// <summary>Set when libVLC could not start: browsing and export still work, playback doesn't.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusLabel))]
+    private string? _engineError;
+
+    /// <summary>A short note when part of a recording couldn't be read (shown over the video).</summary>
+    [ObservableProperty]
+    private string? _clipError;
 
     [ObservableProperty]
     private MediaPlayer? _mediaPlayer;
@@ -119,9 +134,11 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
 
     public string PositionDateLong => TimeAxis.DateLong(CurrentSeconds);
 
-    public string StatusLabel => IsPlaying
-        ? $"Playing {RateText(Rate)}"
-        : HasFootage ? "Paused" : "No footage";
+    public string StatusLabel => EngineError is not null
+        ? "Video engine unavailable"
+        : IsPlaying
+            ? $"Playing {RateText(Rate)}"
+            : HasFootage ? "Paused" : "No footage";
 
     public string BurnedStamp => $"{PositionDateShort}  {ClockString}";
 
@@ -216,27 +233,57 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
 
     private void InitializeEngine()
     {
-        var libVlc = new LibVLC("--no-osd", "--no-video-title-show");
+        // --ignore-config: never read a vlcrc. --no-sub-autodetect-file: never go looking for files beside the
+        // input. (libVLC's Lua engine is not shipped at all — see the csproj.)
+        // No OSD, no subtitles of any kind (--no-spu: subtitle tracks in a card's MKV are never decoded).
+        var libVlc = new LibVLC("--no-osd", "--no-video-title-show", "--ignore-config", "--no-sub-autodetect-file", "--no-spu");
         var player = new MediaPlayer(libVlc) { EnableHardwareDecoding = true };
 
-        // Marshal to the UI thread and drop the event if we've since been disposed — LibVLC can raise
-        // these from its own thread just after teardown, when MediaPlayer/_libVlc are gone.
+        // Marshal to the UI thread and drop the event if we've since been disposed — LibVLC can raise these
+        // from its own thread just after teardown — or if the media it belongs to has since been swapped out
+        // (events already queued for the old chunk would otherwise move the playhead on the new one).
+        void Post(Action action)
+        {
+            var generation = Volatile.Read(ref _mediaGeneration);
+            _dispatcher.BeginInvoke(() =>
+            {
+                if (!_disposed && generation == _mediaGeneration)
+                {
+                    action();
+                }
+            });
+        }
+
         _onTimeChanged = (_, e) =>
         {
             var t = e.Time;
-            _dispatcher.BeginInvoke(() => { if (!_disposed) OnChunkTimeChanged(t); });
+            Post(() => OnChunkTimeChanged(t));
         };
-        _onEndReached = (_, _) => _dispatcher.BeginInvoke(() => { if (!_disposed) OnChunkEnded(); });
-        _onPlaying = (_, _) => _dispatcher.BeginInvoke(() => { if (!_disposed) IsPlaying = true; });
-        _onPaused = (_, _) => _dispatcher.BeginInvoke(() => { if (!_disposed) IsPlaying = false; });
+        _onEndReached = (_, _) => Post(OnChunkEnded);
+        _onPlaying = (_, _) => Post(() =>
+        {
+            IsPlaying = true;
+            _consecutiveErrors = 0;
+        });
+        _onPaused = (_, _) => Post(() => IsPlaying = false);
+        _onError = (_, _) => Post(OnChunkError);
 
         player.TimeChanged += _onTimeChanged;
         player.EndReached += _onEndReached;
         player.Playing += _onPlaying;
         player.Paused += _onPaused;
+        player.EncounteredError += _onError;
 
         _dispatcher.Invoke(() =>
         {
+            if (_disposed)
+            {
+                // Closed while the engine was starting: release it instead of leaking it.
+                player.Dispose();
+                libVlc.Dispose();
+                return;
+            }
+
             _libVlc = libVlc;
             player.Mute = IsMuted;
             MediaPlayer = player;
@@ -247,7 +294,22 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
     public async Task LoadCamera(OpenCard card, string cameraName, string cameraModel,
         IReadOnlyList<Recording> recordings)
     {
-        await _initTask;
+        var version = ++_seekVersion; // supersede any seek still in flight for the previous camera
+        try
+        {
+            await _initTask;
+        }
+        catch (Exception ex)
+        {
+            // No video engine: keep browsing, the timeline and export working; only playback is unavailable.
+            EngineError = ex.Message;
+        }
+
+        if (version != _seekVersion || _disposed)
+        {
+            return; // superseded (another camera load, or the card closed) while the engine was starting
+        }
+
         StopPlayback();
 
         _card = card;
@@ -256,7 +318,9 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         SelInSeconds = null;
         SelOutSeconds = null;
 
+        // A recording with no chunks has nothing to play; leave it out of playback (it is still listed).
         _segments = recordings
+            .Where(r => r.Chunks.Count > 0)
             .Select(r => new TimeSegment(r))
             .OrderBy(s => s.StartSeconds)
             .ToArray();
@@ -267,7 +331,10 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
 
         if (_segments.Length > 0)
         {
-            await SeekToSeconds(_segments[^1].StartSeconds, autoPlay: false);
+            // Start at the newest recording — but not at a bogus far-future one from a corrupt or crafted card.
+            var horizon = TimeAxis.ToSeconds(DateTime.UtcNow.AddDays(2));
+            var newest = _segments.LastOrDefault(s => s.StartSeconds <= horizon) ?? _segments[^1];
+            await SeekToSeconds(newest.StartSeconds, autoPlay: false);
         }
         else
         {
@@ -300,7 +367,14 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
     public async void ScrubCommit(double seconds)
     {
         _isScrubbing = false;
-        await SeekToSeconds(seconds, autoPlay: IsPlaying);
+        try
+        {
+            await SeekToSeconds(seconds, autoPlay: IsPlaying);
+        }
+        catch (OperationCanceledException)
+        {
+            // the card was closed or removed mid-seek
+        }
     }
 
     /// <summary>Seeks to an axis position; plays the containing segment or shows the gap state.</summary>
@@ -329,26 +403,43 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
             var segment = _segments[segIndex];
 
             // First entry into this recording: load exact chunk metadata (a few small reads),
-            // which can shift the estimated end. Re-resolve afterwards.
+            // which can shift the estimated start/end. Re-resolve afterwards.
             if (!segment.IsRefined && _card is not null)
             {
+                // A newer seek cancels this one's load (between chunks; what was loaded is kept).
+                _seekCts?.Cancel();
+                var cts = _seekCts = new CancellationTokenSource();
+                var card = _card;
                 try
                 {
-                    await _card.LoadMetadataAsync(segment.Recording);
+                    await card.LoadMetadataAsync(segment.Recording, cts.Token);
                 }
                 catch (OperationCanceledException)
                 {
-                    return; // the card was closed/removed while metadata was loading — nothing to do
+                    return; // superseded, or the card was closed/removed while metadata was loading
                 }
 
-                if (version != _seekVersion)
+                // The card may have been closed, or the camera switched, while metadata loaded.
+                if (version != _seekVersion || !ReferenceEquals(card, _card) ||
+                    segIndex >= _segments.Length || !ReferenceEquals(_segments[segIndex], segment))
                 {
-                    return; // a newer seek superseded this one while metadata loaded
+                    return;
                 }
 
+                var oldStart = segment.StartSeconds;
                 segment.Refine();
-                RebuildTimelineSegments();
+                if (segment.StartSeconds != oldStart)
+                {
+                    ResortSegments();
+                    RebuildTimelineSegments();
+                }
+                else
+                {
+                    UpdateTimelineSegment(segIndex);
+                }
+
                 UpdateSegCountLabel();
+                segIndex = Array.IndexOf(_segments, segment);
 
                 if (!segment.Contains(seconds))
                 {
@@ -356,8 +447,9 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
                 }
             }
 
-            // Fast path: staying inside the currently open chunk just moves the playback time.
-            if (segIndex == _activeSegment && MediaPlayer is not null && _currentMedia is not null)
+            // Fast path: staying inside the currently open chunk just moves the playback time — but only while
+            // the player is actually holding it (an ended or errored player ignores a time change).
+            if (segIndex == _activeSegment && MediaPlayer is { State: VLCState.Playing or VLCState.Paused } && _currentMedia is not null)
             {
                 var (chunkIndex, offset) = segment.Locate(seconds);
                 if (chunkIndex == _activeChunk)
@@ -417,9 +509,40 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         {
             MediaPlayer.Play();
         }
-        else if (_segments.Length > 0)
+        else
         {
-            _ = JumpNearest(play: true);
+            ResumeOrJump();
+        }
+    }
+
+    /// <summary>Plays from the playhead when it sits on footage whose media was released (e.g. after an
+    /// export), otherwise jumps to the nearest recording.</summary>
+    private void ResumeOrJump()
+    {
+        if (_segments.Length == 0)
+        {
+            return;
+        }
+
+        _ = BestSegmentIndex(CurrentSeconds) >= 0
+            ? Observe(SeekToSeconds(CurrentSeconds, autoPlay: true))
+            : Observe(JumpNearest(play: true));
+    }
+
+    /// <summary>Fire-and-forget with the faults observed: a card closed mid-operation is expected, anything
+    /// else is logged rather than lost.</summary>
+    private static async Task Observe(Task task)
+    {
+        try
+        {
+            await task;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            App.Log("Playback", ex);
         }
     }
 
@@ -482,13 +605,13 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
 
         Rate = value;
         MediaPlayer?.SetRate(value);
-        if (HasFootage)
+        if (HasFootage && _currentMedia is not null)
         {
             MediaPlayer?.Play();
         }
         else
         {
-            _ = JumpNearest(play: true);
+            ResumeOrJump();
         }
     }
 
@@ -519,6 +642,13 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
     {
         SelInSeconds = null;
         SelOutSeconds = null;
+    }
+
+    /// <summary>Sets the export range (mark-in/out) programmatically.</summary>
+    public void SetSelection(double inSeconds, double outSeconds)
+    {
+        SelInSeconds = Math.Min(inSeconds, outSeconds);
+        SelOutSeconds = Math.Max(inSeconds, outSeconds);
     }
 
     /// <summary>
@@ -568,8 +698,8 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
 
     private void PlayChunk(TimeSegment segment, int chunkIndex, TimeSpan offset, bool play)
     {
-        if (_card is null || MediaPlayer is null || _libVlc is null ||
-            chunkIndex < 0 || chunkIndex >= segment.Recording.Chunks.Count)
+        // The chunk comes from the same mapping as the index (the recording's own list may have been replaced since).
+        if (_card is null || MediaPlayer is null || _libVlc is null || segment.ChunkAt(chunkIndex) is not { } chunk)
         {
             return;
         }
@@ -579,14 +709,35 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         // keeps the output alive so the transition clears to black instead of flashing white.
         // The previous media/input/stream are disposed a beat later, once libvlc has released
         // them, to avoid the demux-callback race that a synchronous dispose would hit.
+        // Build the new media first, so a failure leaves the player state untouched.
+        Stream stream;
+        MediaInput input;
+        Media media;
+        try
+        {
+            stream = _card.OpenChunk(chunk);
+            input = new StreamMediaInput(stream);
+            media = new Media(_libVlc, input);
+
+            // Only the Matroska demuxer may open card data: a crafted chunk in another format must not reach
+            // VLC's other parsers, all of which run inside this elevated process.
+            media.AddOption(":demux=mkv");
+        }
+        catch (OperationCanceledException)
+        {
+            return; // the card was closed
+        }
+
         var oldMedia = _currentMedia;
         var oldInput = _currentInput;
         var oldStream = _currentStream;
 
+        Interlocked.Increment(ref _mediaGeneration);
         _activeChunk = chunkIndex;
-        _currentStream = _card.OpenChunk(segment.Recording.Chunks[chunkIndex]);
-        _currentInput = new StreamMediaInput(_currentStream);
-        _currentMedia = new Media(_libVlc, _currentInput);
+        _currentStream = stream;
+        _currentInput = input;
+        _currentMedia = media;
+        ClipError = null;
 
         MediaPlayer.Play(_currentMedia);
         MediaPlayer.SetRate(Rate);
@@ -619,7 +770,8 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
 
     private static async Task DisposeAfterSwap(Media? media, MediaInput? input, Stream? stream)
     {
-        await Task.Delay(250);
+        // Off the UI thread: disposing a card stream waits for the card's I/O gate.
+        await Task.Delay(250).ConfigureAwait(false);
         try { media?.Dispose(); } catch { /* best effort */ }
         try { input?.Dispose(); } catch { /* best effort */ }
         try { stream?.Dispose(); } catch { /* best effort */ }
@@ -706,7 +858,7 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         }
 
         var segment = _segments[_activeSegment];
-        if (_activeChunk + 1 < segment.Recording.Chunks.Count)
+        if (_activeChunk + 1 < segment.ChunkCount)
         {
             PlayChunk(segment, _activeChunk + 1, TimeSpan.Zero, play: true);
             return;
@@ -717,7 +869,7 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         // skipping ahead to the next recording's start.
         if (BestSegmentIndex(segment.EndSeconds) >= 0)
         {
-            _ = SeekToSeconds(segment.EndSeconds, autoPlay: true);
+            _ = Observe(SeekToSeconds(segment.EndSeconds, autoPlay: true));
             return;
         }
 
@@ -727,13 +879,31 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         var next = _segments.FirstOrDefault(s => s.StartSeconds >= segment.EndSeconds);
         if (next is not null)
         {
-            _ = SeekToSeconds(next.StartSeconds, autoPlay: true);
+            _ = Observe(SeekToSeconds(next.StartSeconds, autoPlay: true));
         }
         else
         {
             IsPlaying = false;
             CurrentSeconds = segment.EndSeconds;
         }
+    }
+
+    /// <summary>
+    /// VLC could not read or decode the current chunk (damaged, truncated by a card pull, not Matroska).
+    /// While playing, skip past it — like reaching its end — so one bad spot doesn't halt playback; after a
+    /// few failures in a row, stop and say so rather than racing through a dead card.
+    /// </summary>
+    private void OnChunkError()
+    {
+        var wasPlaying = IsPlaying;
+        IsPlaying = false;
+        ClipError = "Part of this recording couldn't be read.";
+        if (!wasPlaying || ++_consecutiveErrors > 3 || _activeSegment < 0 || _activeSegment >= _segments.Length)
+        {
+            return;
+        }
+
+        OnChunkEnded();
     }
 
     private void RebuildTimelineSegments()
@@ -746,15 +916,45 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Redraws one refined segment without rebuilding the whole timeline.</summary>
+    private void UpdateTimelineSegment(int index)
+    {
+        if (index < 0 || index >= _segments.Length || index >= TimelineSegments.Count)
+        {
+            RebuildTimelineSegments();
+            return;
+        }
+
+        var segment = _segments[index];
+        TimelineSegments[index] = new TimelineSegment(segment.StartSeconds, segment.EndSeconds, segment.Recording.Kind);
+    }
+
+    /// <summary>Keeps segments in start order after refinement moved one, preserving the active segment.</summary>
+    private void ResortSegments()
+    {
+        var active = _activeSegment >= 0 && _activeSegment < _segments.Length ? _segments[_activeSegment] : null;
+        _segments = _segments.OrderBy(s => s.StartSeconds).ToArray();
+        _activeSegment = active is null ? -1 : Array.IndexOf(_segments, active);
+    }
+
     private void UpdateSegCountLabel()
     {
-        var totalFootage = TimeSpan.FromSeconds(_segments.Sum(s => s.DurationSeconds));
+        var totalFootage = SafeTime.FromSeconds(_segments.Sum(s => s.DurationSeconds));
         SegCountLabel = $"{_segments.Length} clip{(_segments.Length == 1 ? "" : "s")} · {FormatDuration(totalFootage)} footage";
     }
 
     private void StopPlayback()
     {
-        MediaPlayer?.Stop();
+        Interlocked.Increment(ref _mediaGeneration);
+        if (MediaPlayer is { } player)
+        {
+            player.Stop();
+
+            // Detach the media too: otherwise a later Play() (a speed button, say) would make VLC reopen it
+            // through its already-disposed input.
+            player.Media = null;
+        }
+
         DisposeCurrentMedia();
         _activeChunk = -1;
         IsPlaying = false;
@@ -774,6 +974,8 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
     /// </summary>
     public void DetachCard()
     {
+        _seekVersion++; // any seek still awaiting metadata must not resume against the old segments
+        _seekCts?.Cancel();
         StopPlayback();
         _card = null;
         _segments = [];
@@ -788,8 +990,23 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
         _currentMedia = null;
         _currentInput?.Dispose();
         _currentInput = null;
-        _currentStream?.Dispose();
-        _currentStream = null;
+
+        // The card stream's dispose waits for the card's I/O gate; don't do that on the UI thread.
+        if (_currentStream is { } stream)
+        {
+            _currentStream = null;
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    stream.Dispose();
+                }
+                catch
+                {
+                    // best effort
+                }
+            });
+        }
     }
 
     private static string RateText(float rate) => rate == 1 ? "1×" : $"{rate:0.#}×";
@@ -816,7 +1033,10 @@ public sealed partial class PlaybackViewModel : ObservableObject, IDisposable
             if (_onEndReached is not null) mp.EndReached -= _onEndReached;
             if (_onPlaying is not null) mp.Playing -= _onPlaying;
             if (_onPaused is not null) mp.Paused -= _onPaused;
+            if (_onError is not null) mp.EncounteredError -= _onError;
         }
+
+        _seekCts?.Cancel();
 
         StopPlayback();
         MediaPlayer?.Dispose();

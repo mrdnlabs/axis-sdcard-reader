@@ -44,14 +44,22 @@ public static class MkvMetadataReader
     /// <param name="scanClustersForDuration">When the header has no Duration element (typical for
     /// camera-written files), walk the clusters to derive one. Costs a pass over the file's
     /// element structure (cheap: skips payloads), not a full read.</param>
-    public static MkvMetadata? Read(Stream stream, bool scanClustersForDuration = true)
+    public static MkvMetadata? Read(Stream stream, bool scanClustersForDuration = true) =>
+        Read(stream, scanClustersForDuration ? MaxClusterScanBytes : 0, CancellationToken.None);
+
+    /// <summary>
+    /// Like <see cref="Read(Stream, bool)"/>, with the duration scan limited to the first
+    /// <paramref name="maxClusterScanBytes"/> after the first cluster (0: no scan) and stopped by
+    /// <paramref name="cancellationToken"/>. Throws <see cref="OperationCanceledException"/> when cancelled.
+    /// </summary>
+    public static MkvMetadata? Read(Stream stream, long maxClusterScanBytes, CancellationToken cancellationToken)
     {
         // A metadata reader parsing on-card (possibly truncated/corrupt, or read through a
         // third-party ext4 stack) files must never throw into the app. Any read failure that
         // escapes the inner scans degrades to "not readable" rather than crashing.
         try
         {
-            return ReadCore(stream, scanClustersForDuration);
+            return ReadCore(stream, Math.Max(0, maxClusterScanBytes), cancellationToken);
         }
         catch (EndOfStreamException)
         {
@@ -63,7 +71,7 @@ public static class MkvMetadataReader
         }
     }
 
-    private static MkvMetadata? ReadCore(Stream stream, bool scanClustersForDuration)
+    private static MkvMetadata? ReadCore(Stream stream, long maxClusterScanBytes, CancellationToken cancellationToken)
     {
         stream.Position = 0;
         if (ReadElementId(stream) != EbmlHeader || SkipElement(stream) is null)
@@ -87,10 +95,21 @@ public static class MkvMetadataReader
         var truncated = false;
         long? firstClusterPosition = null;
 
+        // The header is a few hundred bytes in a real chunk. A crafted one can be gigabytes of tiny elements, read
+        // while the card's I/O lock is held, so the elements read and the sections descended into are bounded.
+        var elements = 0;
+        bool Budget() => ++elements <= MaxHeaderElements && stream.Position <= MaxHeaderScanBytes;
+
         try
         {
             while (true)
             {
+                if (!Budget())
+                {
+                    truncated = true;
+                    break;
+                }
+
                 var id = ReadElementId(stream);
                 if (id is null)
                 {
@@ -106,7 +125,13 @@ public static class MkvMetadataReader
                 if (id == SegmentInfo)
                 {
                     var end = ElementEnd(stream);
-                    while (stream.Position < end && ReadElementId(stream) is { } infoId)
+                    if (end != long.MaxValue && end - stream.Position > MaxHeaderSectionBytes)
+                    {
+                        stream.Position = Math.Min(end, stream.Length); // no real SegmentInfo is this large
+                        continue;
+                    }
+
+                    while (stream.Position < end && Budget() && ReadElementId(stream) is { } infoId)
                     {
                         switch (infoId)
                         {
@@ -136,7 +161,13 @@ public static class MkvMetadataReader
                 else if (id == Tracks)
                 {
                     var end = ElementEnd(stream);
-                    while (stream.Position < end && ReadElementId(stream) is { } trackId)
+                    if (end != long.MaxValue && end - stream.Position > MaxHeaderSectionBytes)
+                    {
+                        stream.Position = Math.Min(end, stream.Length); // no real Tracks section is this large
+                        continue;
+                    }
+
+                    while (stream.Position < end && Budget() && ReadElementId(stream) is { } trackId)
                     {
                         if (trackId != TrackEntry)
                         {
@@ -149,7 +180,7 @@ public static class MkvMetadataReader
                         string? entryCodec = null;
                         int? entryWidth = null, entryHeight = null;
 
-                        while (stream.Position < entryEnd && ReadElementId(stream) is { } fieldId)
+                        while (stream.Position < entryEnd && Budget() && ReadElementId(stream) is { } fieldId)
                         {
                             switch (fieldId)
                             {
@@ -161,7 +192,7 @@ public static class MkvMetadataReader
                                     break;
                                 case VideoElement:
                                     var videoEnd = ElementEnd(stream);
-                                    while (stream.Position < videoEnd && ReadElementId(stream) is { } videoId)
+                                    while (stream.Position < videoEnd && Budget() && ReadElementId(stream) is { } videoId)
                                     {
                                         switch (videoId)
                                         {
@@ -225,9 +256,10 @@ public static class MkvMetadataReader
 
         // No usable header duration (live-muxed files carry none, unfinalized camera files
         // carry a 0 placeholder): derive one from the cluster/block timestamps.
-        if (duration is null && scanClustersForDuration && firstClusterPosition is { } clusterStart)
+        if (duration is null && maxClusterScanBytes > 0 && firstClusterPosition is { } clusterStart)
         {
-            var (scanned, scanTruncated) = ScanClustersForDuration(stream, clusterStart, timestampScale);
+            var (scanned, scanTruncated) = ScanClustersForDuration(stream, clusterStart, timestampScale, maxClusterScanBytes,
+                cancellationToken);
             duration = scanned;
             truncated |= scanTruncated;
         }
@@ -240,7 +272,7 @@ public static class MkvMetadataReader
     /// cluster, block timestamps. Returns a lower bound (start of the last frame).
     /// </summary>
     private static (TimeSpan? Duration, bool Truncated) ScanClustersForDuration(
-        Stream stream, long firstClusterPosition, long timestampScale)
+        Stream stream, long firstClusterPosition, long timestampScale, long maxScanBytes, CancellationToken cancellationToken)
     {
         // Single linear walk over all elements from the first cluster onward. Clusters are
         // entered (not skipped) so this works for unknown-size clusters too — live muxers and
@@ -250,10 +282,26 @@ public static class MkvMetadataReader
         long lastBlockRelativeTs = 0;
         var truncated = false;
 
+        // A real 5-minute chunk has a few tens of thousands of elements. Cap the walk so a crafted chunk made of
+        // billions of tiny elements can't hold the card for minutes; the partial result is still a lower bound.
+        // The distance covered is capped too: elements spread out so that each needs its own read would otherwise
+        // make even a modest element count read the card for hours.
+        const int MaxElements = 4_000_000;
+        var elements = 0;
+        var scanEnd = maxScanBytes >= long.MaxValue - firstClusterPosition ? long.MaxValue : firstClusterPosition + maxScanBytes;
+
         try
         {
             while (true)
             {
+                if (++elements > MaxElements || stream.Position > scanEnd)
+                {
+                    truncated = true;
+                    break;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var id = ReadElementId(stream);
                 if (id is null)
                 {
@@ -461,6 +509,13 @@ public static class MkvMetadataReader
     }
 
     /// <summary>Reads the size and returns the absolute end position (or long.MaxValue for unknown size).</summary>
+    private const int MaxHeaderElements = 20_000;
+
+    /// <summary>How far past the first cluster a duration scan goes by default: beyond any real camera chunk.</summary>
+    public const long MaxClusterScanBytes = 1L << 30;
+    private const long MaxHeaderSectionBytes = 1 << 20;
+    private const long MaxHeaderScanBytes = 16 << 20; // the header of a real chunk ends within its first few KiB
+
     private static long ElementEnd(Stream stream)
     {
         var size = ReadSize(stream);
