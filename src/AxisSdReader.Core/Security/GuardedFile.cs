@@ -302,8 +302,12 @@ public static class GuardedFile
         }
     }
 
-    /// <summary>The token of the user without elevation, at identification level (enough to check access with,
-    /// useless for acting as them): the linked token of an elevated split token, else this process's own.</summary>
+    /// <summary>
+    /// The token of the user without elevation, at identification level (enough to check access with, useless for
+    /// acting as them): the linked token of an elevated split token; for an elevated token without one (UAC switched
+    /// off, the built-in Administrator) this process's token with Administrators deny-only at medium integrity -
+    /// what FFmpeg runs on; else this process's own.
+    /// </summary>
     private static TokenHandle? OpenUserToken()
     {
         if (!OpenProcessToken(GetCurrentProcess(), TokenQuery | TokenDuplicate, out var process))
@@ -320,6 +324,19 @@ public static class GuardedFile
                 return GetTokenInformation(process, TokenLinkedTokenClass, out nint linked, nint.Size, out _)
                     ? new TokenHandle(linked)
                     : null;
+            }
+
+            if (OperatingSystem.IsWindows() && ProcessHardening.IsElevated())
+            {
+                // No unelevated half to ask: being elevated must still never decide where an export may land.
+                using var restricted = Media.ChildProcess.CreateRestrictedUserToken();
+                if (DuplicateToken(restricted, SecurityIdentification, out var withoutAdmin))
+                {
+                    return withoutAdmin;
+                }
+
+                withoutAdmin.Dispose();
+                return null;
             }
 
             if (DuplicateToken(process, SecurityIdentification, out var duplicate))
@@ -659,6 +676,9 @@ public static class GuardedFile
 
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool DuplicateToken(TokenHandle existing, int impersonationLevel, out TokenHandle duplicate);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool DuplicateToken(SafeAccessTokenHandle existing, int impersonationLevel, out TokenHandle duplicate);
 
     [DllImport("advapi32.dll", SetLastError = true)]
     private static extern bool AccessCheck(nint securityDescriptor, TokenHandle clientToken, uint desiredAccess,

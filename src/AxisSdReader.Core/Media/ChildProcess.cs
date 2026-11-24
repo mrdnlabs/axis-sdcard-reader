@@ -223,9 +223,10 @@ internal sealed class ChildProcess : IDisposable
     /// A restricted copy of this process's token: what the user could do without elevation. Every group UAC itself
     /// filters out of the user's unelevated token (Administrators, and also e.g. Domain Admins, Backup Operators,
     /// "local account and member of Administrators") is made deny-only, every privilege is removed, and the
-    /// integrity level is lowered to medium.
+    /// integrity level is lowered to medium. (Also what <see cref="Security.GuardedFile.IsUserWritable(Security.GuardedFolder)"/>
+    /// checks folders against when there is no unelevated token to ask.)
     /// </summary>
-    private static SafeAccessTokenHandle CreateRestrictedUserToken()
+    internal static SafeAccessTokenHandle CreateRestrictedUserToken()
     {
         if (!OpenProcessToken(GetCurrentProcess(), TokenDuplicate | TokenQuery | TokenAssignPrimary | TokenAdjustDefault, out var own))
         {
