@@ -34,8 +34,8 @@ public class RecordingTypeClassifierTests
     // 2026-07-14). TriggerType is "triggered" for BOTH kinds, so only the action-rule fields tell them
     // apart — this is the regression that matters most.
     [Theory]
-    [InlineData("triggered", "ACC_Continuous_E827251FFB8D_0", "ACC_ContinuousAction", RecordingKind.Continuous)]
-    [InlineData("triggered", "ACC_Motion_E827251FFB8D_0", "ACC_MotionAction", RecordingKind.Event)]
+    [InlineData("triggered", "ACC_Continuous_ACCC8E123456_0", "ACC_ContinuousAction", RecordingKind.Continuous)]
+    [InlineData("triggered", "ACC_Motion_ACCC8E123456_0", "ACC_MotionAction", RecordingKind.Event)]
     public void ClassifiesRealAcsEdgeTriggers(string type, string name, string trigger, RecordingKind expected)
     {
         Assert.Equal(expected, RecordingTypeClassifier.Classify(type, name, trigger));

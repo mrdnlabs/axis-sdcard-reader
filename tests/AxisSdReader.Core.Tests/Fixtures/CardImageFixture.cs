@@ -65,9 +65,12 @@ public sealed class CardImageFixture
 
         using var process = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start wsl.exe. WSL is required to generate the ext4 test fixture.");
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
+        // Read both streams concurrently: reading one to the end first can deadlock if the other fills its pipe.
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
         process.WaitForExit();
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
 
         if (process.ExitCode != 0)
         {

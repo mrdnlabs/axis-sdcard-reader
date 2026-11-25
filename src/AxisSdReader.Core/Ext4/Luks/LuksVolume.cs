@@ -37,6 +37,8 @@ public static class LuksVolume
     private const int SectorSize = 512;
     private const int MaxStripes = 4000;         // the LUKS1 standard; reject anything larger as corrupt
     private const int MaxIterations = 10_000_000; // cap PBKDF2 cost from a crafted header (DoS guard)
+    private const int MaxDigestIterations = 1_000_000; // the master-key digest is cheap by design (cryptsetup: ~1/8 s)
+    private const long TotalIterationBudget = 24_000_000; // HMAC rounds across all slots tried for one passphrase
 
     /// <summary>Reports whether the stream begins with a LUKS header, without needing a passphrase.</summary>
     public static bool IsLuks(Stream partitionStream)
@@ -93,7 +95,7 @@ public static class LuksVolume
         // (each 16/24/32 bytes), and the digest KDF cost must be sane. A crafted/corrupt header must never
         // crash, hang, or over-allocate.
         if (hdr.KeyBytes is not (32 or 48 or 64) ||
-            hdr.MasterKeyDigestIterations is < 1 or > MaxIterations ||
+            hdr.MasterKeyDigestIterations is < 1 or > MaxDigestIterations ||
             hdr.MasterKeyDigest.Length is < 1 or > 64)
         {
             return new LuksUnlockResult(LuksUnlockStatus.Unsupported, null,
@@ -101,14 +103,30 @@ public static class LuksVolume
         }
 
         var hashName = HashName(hdr.HashSpec);
-        var passwordBytes = Encoding.UTF8.GetBytes(passphrase); // UTF-8 bytes of the passphrase chars
+        // UTF-8 bytes of the passphrase chars, pinned so no stray copy is left behind when the GC compacts.
+        var passwordBytes = GC.AllocateUninitializedArray<byte>(Encoding.UTF8.GetByteCount(passphrase), pinned: true);
+        Encoding.UTF8.GetBytes(passphrase, passwordBytes);
         try
         {
+            long spent = 0;
+            var budgetSpent = false;
             foreach (var slot in hdr.Keyslots)
             {
-                if (!slot.Active)
+                if (!slot.Active || slot.Iterations is < 1 or > MaxIterations)
                 {
-                    continue;
+                    continue; // inactive, or implausible (and not worth spending the budget on)
+                }
+
+                // Bound the total key-derivation work for one attempt: a crafted header can mark all eight slots
+                // active at the per-slot maximum, which would make every passphrase try take minutes. Counted as the
+                // HMAC rounds PBKDF2 really runs: iterations per output block (a 64-byte key from SHA-1 takes four),
+                // plus the master-key digest each slot is checked against.
+                spent += slot.Iterations * Pbkdf2Blocks(hdr.KeyBytes, hashName) +
+                         hdr.MasterKeyDigestIterations * Pbkdf2Blocks((uint)hdr.MasterKeyDigest.Length, hashName);
+                if (spent > TotalIterationBudget)
+                {
+                    budgetSpent = true;
+                    break;
                 }
 
                 var masterKey = TryKeyslot(partitionStream, hdr, slot, passwordBytes, hashName);
@@ -131,7 +149,10 @@ public static class LuksVolume
                 }
             }
 
-            return new LuksUnlockResult(LuksUnlockStatus.WrongPassphrase, null, "The passphrase is incorrect.");
+            return budgetSpent
+                ? new LuksUnlockResult(LuksUnlockStatus.Unsupported, null,
+                    "The card's encryption header asks for far more key-derivation work than a camera uses, so not every key slot was tried.")
+                : new LuksUnlockResult(LuksUnlockStatus.WrongPassphrase, null, "The passphrase is incorrect.");
         }
         finally
         {
@@ -162,39 +183,50 @@ public static class LuksVolume
 
         // 1) Passphrase -> key-slot key (PBKDF2).
         var slotKey = Rfc2898DeriveBytes.Pbkdf2(passwordBytes, slot.Salt, (int)slot.Iterations, hash, keyBytes);
+        byte[]? plain = null;
+        byte[]? candidate = null;
+        var keep = false;
         try
         {
             // 2) Read + XTS-decrypt the slot's anti-forensic key material.
             var cipher = ReadExact(partition, materialStart, materialSectors * SectorSize);
-            var plain = new byte[materialSectors * SectorSize];
+            plain = new byte[materialSectors * SectorSize];
             using (var xts = new XtsAes(slotKey))
             {
-                for (var s = 0; s < materialSectors; s++)
-                {
-                    xts.DecryptSector((ulong)s, cipher.AsSpan(s * SectorSize, SectorSize), plain.AsSpan(s * SectorSize, SectorSize));
-                }
+                xts.DecryptSectors(0, cipher, 0, plain, 0, materialSectors);
             }
 
             // 3) AF-merge to a candidate master key.
-            var candidate = AntiForensic.Merge(plain.AsSpan(0, materialLength), keyBytes, stripes, hdr.HashSpec);
-            CryptographicOperations.ZeroMemory(plain);
+            candidate = AntiForensic.Merge(plain.AsSpan(0, materialLength), keyBytes, stripes, hdr.HashSpec);
 
             // 4) Verify against the stored master-key digest (PBKDF2 of the candidate).
             var digest = Rfc2898DeriveBytes.Pbkdf2(candidate, hdr.MasterKeyDigestSalt, (int)hdr.MasterKeyDigestIterations,
                 hash, hdr.MasterKeyDigest.Length);
 
-            if (CryptographicOperations.FixedTimeEquals(digest, hdr.MasterKeyDigest))
-            {
-                return candidate;
-            }
-
-            CryptographicOperations.ZeroMemory(candidate);
-            return null;
+            keep = CryptographicOperations.FixedTimeEquals(digest, hdr.MasterKeyDigest);
+            return keep ? candidate : null;
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(slotKey); // wipe the passphrase-derived slot key on every path
+            // Wipe every intermediate on every path (an exception included); the caller wipes a returned key.
+            CryptographicOperations.ZeroMemory(slotKey);
+            if (plain is not null)
+            {
+                CryptographicOperations.ZeroMemory(plain);
+            }
+
+            if (candidate is not null && !keep)
+            {
+                CryptographicOperations.ZeroMemory(candidate);
+            }
         }
+    }
+
+    /// <summary>How many PBKDF2 output blocks (each a full run of the iterations) a key of this size takes.</summary>
+    private static long Pbkdf2Blocks(uint outputBytes, HashAlgorithmName hash)
+    {
+        var digest = hash == HashAlgorithmName.SHA1 ? 20 : hash == HashAlgorithmName.SHA256 ? 32 : 64;
+        return Math.Max(1, (outputBytes + digest - 1) / digest);
     }
 
     private static HashAlgorithmName HashName(string hashSpec) => hashSpec.ToLowerInvariant() switch

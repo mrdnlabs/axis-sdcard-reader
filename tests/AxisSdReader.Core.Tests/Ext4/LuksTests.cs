@@ -78,6 +78,26 @@ public class LuksTests
         Assert.Equal(CardOpenStatus.Encrypted, reader.Status);
     }
 
+    [Fact]
+    public void AnEncryptedCardSaysWhichPartitionItsPassphraseIsFor()
+    {
+        // The app locks that partition before asking for the passphrase, so it needs its location up front - and
+        // again after a wrong passphrase, so the lock can be kept for the next try.
+        var (image, _) = BuildLuks1Image(Passphrase);
+
+        using (var locked = CardReader.Open(new MemoryStream(image), Ownership.None))
+        {
+            Assert.Equal(CardOpenStatus.EncryptedNeedsPassphrase, locked.Status);
+            Assert.NotNull(locked.Volume);
+            Assert.Equal(0, locked.Volume!.FirstByte);
+            Assert.Equal(image.Length, locked.Volume.LengthBytes);
+        }
+
+        using var wrong = CardReader.Open(new MemoryStream(image), Ownership.None, "not-the-passphrase".ToCharArray());
+        Assert.Equal(CardOpenStatus.IncorrectPassphrase, wrong.Status);
+        Assert.NotNull(wrong.Volume);
+    }
+
     [Theory]
     [InlineData(6, new byte[] { 0x00, 0x02 })]              // version -> LUKS2 (unsupported)
     [InlineData(108, new byte[] { 0x00, 0x00, 0x03, 0xE7 })] // KeyBytes -> 999 (invalid AES-XTS size)

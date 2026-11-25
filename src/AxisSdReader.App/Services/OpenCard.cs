@@ -1,22 +1,23 @@
 using System.IO;
 using AxisSdReader.Core;
 using AxisSdReader.Core.Axis;
+using AxisSdReader.Core.Disk;
 using AxisSdReader.Core.Ext4;
-using DiscUtils;
+using AxisSdReader.Core.Media;
 
 namespace AxisSdReader.App.Services;
 
 /// <summary>
-/// An opened card (physical device with volume protection, or an image file) plus its
-/// indexed Axis content. All card I/O in the app funnels through <see cref="RunExclusive{T}"/>
-/// because DiscUtils streams share one underlying device stream and are not thread-safe.
+/// An opened card (physical device with volume protection, or an image file) plus its indexed Axis content.
+/// All card I/O funnels through one <see cref="CardIoGate"/>, because the DiscUtils streams share one
+/// underlying device stream and are not thread-safe. The gate is taken per read (playback, export streaming)
+/// or per chunk (metadata), never for long stretches, so nothing — least of all the UI thread — waits long.
 /// </summary>
 public sealed class OpenCard : IDisposable
 {
     private readonly SdCardSession? _session;   // physical device (owns reader + guard)
     private readonly CardReader _reader;        // image files: owned directly
-    private readonly SemaphoreSlim _ioLock = new(1, 1);
-    private readonly CancellationTokenSource _teardownCts = new(); // cancels long ops (index) on dispose
+    private readonly CancellationTokenSource _teardownCts = new(); // cancels long ops (index, metadata) on dispose
     private volatile bool _disposed;
 
     private OpenCard(SdCardSession? session, CardReader reader, string description, bool isPhysicalDevice,
@@ -27,6 +28,11 @@ public sealed class OpenCard : IDisposable
         Description = description;
         IsPhysicalDevice = isPhysicalDevice;
         CapacityBytes = capacityBytes;
+        if (session is not null)
+        {
+            session.MediaLost += () => MediaLost?.Invoke();
+            session.ProtectionChanged += () => ProtectionChanged?.Invoke();
+        }
     }
 
     /// <summary>Friendly card name — device model (e.g. "SanDisk Extreme") or image file name.</summary>
@@ -44,10 +50,10 @@ public sealed class OpenCard : IDisposable
 
     public string? FailureDetail => _reader.FailureDetail;
 
-    public DiscFileSystem? FileSystem => _reader.FileSystem;
+    public Ext4Volume? FileSystem => _reader.FileSystem;
 
     /// <summary>ext4 volume label (Axis cameras write "Axis").</summary>
-    public string? VolumeLabel => _reader.FileSystem?.VolumeLabel;
+    public string? VolumeLabel => _reader.VolumeLabel;
 
     public IReadOnlyList<string> ProtectionLog => _session?.ProtectionLog ?? [];
 
@@ -63,10 +69,19 @@ public sealed class OpenCard : IDisposable
 
     public AxisCard? Index { get; private set; }
 
+    /// <summary>The gate every card read goes through.</summary>
+    public CardIoGate Gate { get; } = new();
+
+    /// <summary>The physical card was pulled or swapped (raised on a pool thread).</summary>
+    public event Action? MediaLost;
+
+    /// <summary>The protection state changed (a late volume was locked, or could not be); pool thread.</summary>
+    public event Action? ProtectionChanged;
+
     public static OpenCard FromDevice(int diskNumber, string description, long? capacityBytes = null,
-        char[]? passphrase = null)
+        char[]? passphrase = null, VolumeGuard? adoptGuard = null)
     {
-        var session = SdCardSession.Open(diskNumber, passphrase: passphrase);
+        var session = SdCardSession.Open(diskNumber, passphrase: passphrase, adoptGuard: adoptGuard);
         return new OpenCard(session, session.Card, description, isPhysicalDevice: true, capacityBytes)
         {
             DiskNumber = diskNumber,
@@ -89,161 +104,93 @@ public sealed class OpenCard : IDisposable
         return new OpenCard(null, reader, Path.GetFileName(imagePath), isPhysicalDevice: false, size);
     }
 
-    /// <summary>Runs a card I/O operation with exclusive access, off the calling thread.</summary>
-    public async Task<T> RunExclusive<T>(Func<T> operation)
-    {
-        // If the card was (or is being) torn down, cancel cleanly instead of throwing
-        // ObjectDisposedException off a disposed lock — a card pulled mid-operation is expected, not an error.
-        ThrowIfDisposed();
+    /// <summary>Begins watching a physical card for removal/swap and late volumes (no-op for images).</summary>
+    public void StartMonitoring() => _session?.StartMonitoring();
 
-        // ConfigureAwait(false): the lock release must run off the UI thread. OpenChunk takes this same
-        // lock with a synchronous Wait() on the UI thread, so if the release continuation were marshaled
-        // back to a blocked UI thread the two would deadlock.
-        await WaitLockAsync(CancellationToken.None).ConfigureAwait(false);
-        try
-        {
-            return await Task.Run(operation).ConfigureAwait(false);
-        }
-        finally
-        {
-            ReleaseLock();
-        }
-    }
+    /// <summary>Takes the card's volume lock out of this (failed or locked) open, to hand to the next attempt.</summary>
+    public VolumeGuard? DetachGuard() => _session?.DetachGuard();
 
-    /// <summary>Runs an async card I/O operation with exclusive access held for its whole duration
-    /// (e.g. copy chunks off the card then run FFmpeg), so nothing else touches the shared stream.</summary>
-    public async Task<T> RunExclusiveAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
+    /// <summary>Runs a card I/O operation with exclusive access, on the thread pool.</summary>
+    public Task<T> RunExclusive<T>(Func<T> operation)
     {
+        // A card pulled (or closed) mid-operation is expected: cancel cleanly rather than throw.
         ThrowIfDisposed();
-        await WaitLockAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            // Start the operation on the thread pool (not the calling UI thread) so none of its internal
-            // continuations can be marshaled back to a UI thread that may be blocked in OpenChunk's Wait().
-            return await Task.Run(() => operation(cancellationToken), cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            ReleaseLock();
-        }
+        return Gate.RunAsync(operation);
     }
 
     private void ThrowIfDisposed()
     {
         if (_disposed)
         {
-            throw new OperationCanceledException("The card was closed.");
-        }
-    }
-
-    /// <summary>Waits on the I/O lock, translating a dispose that races this call into a cancellation.</summary>
-    private async Task WaitLockAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await _ioLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (ObjectDisposedException)
-        {
-            throw new OperationCanceledException("The card was closed.");
-        }
-    }
-
-    /// <summary>Releases the I/O lock, tolerating a dispose that already tore it down.</summary>
-    private void ReleaseLock()
-    {
-        try
-        {
-            _ioLock.Release();
-        }
-        catch (ObjectDisposedException)
-        {
-            // Card was disposed while this operation was running; nothing to release.
+            throw new CardClosedException();
         }
     }
 
     public async Task<AxisCard> IndexAsync(Action<int>? progress = null)
     {
-        var fs = FileSystem ?? throw new InvalidOperationException("No filesystem is open.");
+        _ = FileSystem ?? throw new InvalidOperationException("No filesystem is open.");
         // Observe the teardown token so closing the card mid-index unwinds the walk promptly and frees the
-        // I/O lock, letting Dispose acquire it before tearing down the shared stream.
-        Index = await RunExclusive(() => AxisCardIndexer.Index(fs, progress, _teardownCts.Token));
+        // gate, letting Dispose acquire it before tearing down the shared stream.
+        Index = await RunExclusive(() => AxisCardIndexer.Index(_reader, progress, _teardownCts.Token));
         return Index;
     }
 
-    public Task LoadMetadataAsync(Recording recording)
-    {
-        var fs = FileSystem ?? throw new InvalidOperationException("No filesystem is open.");
-        return RunExclusive<object?>(() =>
-        {
-            recording.LoadChunkMetadata(fs);
-            return null;
-        });
-    }
+    /// <summary>Loads one recording's chunk metadata, taking the gate per chunk.</summary>
+    public Task LoadMetadataAsync(Recording recording, CancellationToken cancellationToken = default) =>
+        LoadMetadataAsync([recording], cancellationToken);
 
-    /// <summary>Loads chunk metadata for many recordings in one exclusive pass (a day's worth).</summary>
-    public Task LoadMetadataAsync(IEnumerable<Recording> recordings)
+    /// <summary>Loads chunk metadata for many recordings (e.g. a day's worth), taking the gate per chunk so
+    /// playback keeps reading in between. Cancellable between chunks; progress so far is kept.</summary>
+    public Task LoadMetadataAsync(IEnumerable<Recording> recordings, CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
         var fs = FileSystem ?? throw new InvalidOperationException("No filesystem is open.");
-        var list = recordings.ToList();
-        return RunExclusive<object?>(() =>
+        var list = recordings.Where(r => !r.MetadataLoaded).ToList();
+        if (list.Count == 0)
         {
+            return Task.CompletedTask;
+        }
+
+        var token = _teardownCts.Token;
+        return Task.Run(() =>
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, cancellationToken);
             foreach (var recording in list)
             {
-                recording.LoadChunkMetadata(fs);
+                recording.LoadChunkMetadata(fs, Gate, linked.Token);
             }
-
-            return null;
-        });
+        }, CancellationToken.None);
     }
 
     /// <summary>
-    /// Opens a chunk for playback. VLC reads the returned stream from its own demux thread, so the
-    /// stream is wrapped to take the same exclusive I/O lock on every read/seek — the underlying
-    /// DiscUtils streams all share one device stream and are not thread-safe, so playback reads must be
-    /// serialized against indexing/metadata/export just like every other card operation.
+    /// Opens a chunk for reading from any thread (VLC's demux thread, the loopback media server). Returns at
+    /// once: the file is opened on first read, by the reading thread, under the gate — so this never blocks
+    /// the UI thread behind other card I/O.
     /// </summary>
     public Stream OpenChunk(RecordingChunk chunk)
     {
         ThrowIfDisposed();
         var fs = FileSystem ?? throw new InvalidOperationException("No filesystem is open.");
-        _ioLock.Wait();
-        try
-        {
-            var inner = fs.OpenFile(chunk.Path, FileMode.Open, FileAccess.Read);
-            return new SynchronizedCardStream(inner, _ioLock);
-        }
-        finally
-        {
-            _ioLock.Release();
-        }
+        return new SynchronizedCardStream(Gate, () => Recording.OpenChunk(fs, chunk), chunk.SizeBytes);
     }
+
+    /// <summary>Loopback media sources for chunks (named c0.mkv, c1.mkv, … in order).</summary>
+    public IReadOnlyList<MediaSource> MediaSources(IReadOnlyList<RecordingChunk> chunks) =>
+        chunks.Select((chunk, i) => new MediaSource($"c{i}.mkv", chunk.SizeBytes, () => OpenChunk(chunk))).ToList();
 
     public void Dispose()
     {
-        // Mark disposed FIRST so any RunExclusive/OpenChunk caller that races this teardown cancels cleanly
-        // rather than throwing ObjectDisposedException off the disposed lock.
+        if (_disposed)
+        {
+            return;
+        }
+
+        // Mark disposed first so new callers cancel cleanly; cancel long operations (index, metadata) so they
+        // let go of the gate; then tear down behind any in-flight read — bounded, so a stuck read can't hang
+        // shutdown forever.
         _disposed = true;
-
-        // Cancel a long in-flight index so it unwinds and frees the I/O lock promptly (the export is
-        // cancelled by the caller; this covers the non-cancellable-looking index path).
         _teardownCts.Cancel();
-
-        // Then serialize teardown BEHIND any in-flight exclusive I/O (indexing / metadata / a running
-        // export), so the shared, non-thread-safe DiscUtils/decrypt streams are never disposed out from
-        // under an active read — on ANY teardown path (card removal, window close, shutdown). Callers
-        // cancel long operations (export) first, so this wait is normally instant; it is bounded so a stuck
-        // operation cannot hang shutdown forever.
-        var entered = false;
-        try
-        {
-            entered = _ioLock.Wait(TimeSpan.FromSeconds(20));
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-
-        try
+        Gate.Close(() =>
         {
             if (_session is not null)
             {
@@ -253,108 +200,7 @@ public sealed class OpenCard : IDisposable
             {
                 _reader.Dispose();
             }
-        }
-        finally
-        {
-            if (entered)
-            {
-                try { _ioLock.Release(); }
-                catch (ObjectDisposedException) { }
-            }
-
-            _ioLock.Dispose();
-            _teardownCts.Dispose();
-        }
-    }
-}
-
-/// <summary>
-/// Wraps a card file stream so that every read/seek is serialized through the card's I/O lock. This lets
-/// VLC read a chunk from its own thread while indexing/metadata/export I/O runs elsewhere without the
-/// underlying shared, non-thread-safe DiscUtils/device stream ever being touched by two threads at once.
-/// Read-only; the lock is a synchronous <see cref="SemaphoreSlim.Wait()"/> (fast when uncontended).
-/// </summary>
-internal sealed class SynchronizedCardStream : Stream
-{
-    private readonly Stream _inner;
-    private readonly SemaphoreSlim _ioLock;
-
-    public SynchronizedCardStream(Stream inner, SemaphoreSlim ioLock)
-    {
-        _inner = inner;
-        _ioLock = ioLock;
-    }
-
-    public override bool CanRead => true;
-    public override bool CanSeek => _inner.CanSeek;
-    public override bool CanWrite => false;
-
-    public override long Length
-    {
-        get
-        {
-            _ioLock.Wait();
-            try { return _inner.Length; }
-            finally { _ioLock.Release(); }
-        }
-    }
-
-    public override long Position
-    {
-        get
-        {
-            _ioLock.Wait();
-            try { return _inner.Position; }
-            finally { _ioLock.Release(); }
-        }
-        set
-        {
-            _ioLock.Wait();
-            try { _inner.Position = value; }
-            finally { _ioLock.Release(); }
-        }
-    }
-
-    public override int Read(byte[] buffer, int offset, int count)
-    {
-        _ioLock.Wait();
-        try { return _inner.Read(buffer, offset, count); }
-        finally { _ioLock.Release(); }
-    }
-
-    public override long Seek(long offset, SeekOrigin origin)
-    {
-        _ioLock.Wait();
-        try { return _inner.Seek(offset, origin); }
-        finally { _ioLock.Release(); }
-    }
-
-    public override void Flush() { }
-
-    public override void SetLength(long value) => throw new NotSupportedException();
-
-    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            // A deferred playback-stream disposal can race card teardown, by which point the lock is
-            // already gone. If so, just release the inner stream without serialization.
-            var entered = false;
-            try
-            {
-                _ioLock.Wait();
-                entered = true;
-            }
-            catch (ObjectDisposedException)
-            {
-            }
-
-            try { _inner.Dispose(); }
-            finally { if (entered) _ioLock.Release(); }
-        }
-
-        base.Dispose(disposing);
+        }, TimeSpan.FromSeconds(20));
+        _teardownCts.Dispose();
     }
 }

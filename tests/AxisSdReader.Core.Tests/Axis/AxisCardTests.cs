@@ -19,7 +19,7 @@ public class AxisCardTests
     public void IndexesNestedAndFlatLayouts()
     {
         using var reader = CardReader.OpenImage(_fixture.ImagePath);
-        var card = AxisCardIndexer.Index(reader.FileSystem!);
+        var card = AxisCardIndexer.Index(reader);
 
         // 3 single-sensor recordings + 4 from the multi-sensor camera.
         Assert.Equal(7, card.Recordings.Count);
@@ -34,7 +34,7 @@ public class AxisCardTests
         Assert.Equal(
             ["20250114_093000_5B35.mkv", "20250114_093002_9D2B.mkv", "20250114_093004_84BA.mkv"],
             nested.Chunks.Select(c => c.FileName).ToArray());
-        Assert.All(nested.Chunks, c => Assert.NotNull(c.SidecarPath));
+        Assert.All(nested.Chunks, c => Assert.NotNull(c.SidecarInode));
 
         // recording.xml parsed at index time: true UTC start, trigger, encoding.
         Assert.NotNull(nested.Info);
@@ -58,7 +58,7 @@ public class AxisCardTests
     public void SidecarsProvideTimingWithoutMkvReads()
     {
         using var reader = CardReader.OpenImage(_fixture.ImagePath);
-        var card = AxisCardIndexer.Index(reader.FileSystem!);
+        var card = AxisCardIndexer.Index(reader);
 
         var nested = card.Recordings.Single(r => r.Id.Raw == "20250114_093000_1A2B_ACCC8E123456");
         nested.LoadChunkMetadata(reader.FileSystem!);
@@ -80,7 +80,7 @@ public class AxisCardTests
     public void InterruptedAv1RecordingFallsBackToMkvScan()
     {
         using var reader = CardReader.OpenImage(_fixture.ImagePath);
-        var card = AxisCardIndexer.Index(reader.FileSystem!);
+        var card = AxisCardIndexer.Index(reader);
 
         var av1 = card.Recordings.Single(r => r.Id.Raw == "20250114_101500_77F0_ACCC8E123456");
         Assert.Equal("V_AV1", av1.VideoCodecId);
@@ -103,7 +103,7 @@ public class AxisCardTests
     public void LegacyRecordingLoadsMetadataFromMkvHeaders()
     {
         using var reader = CardReader.OpenImage(_fixture.ImagePath);
-        var card = AxisCardIndexer.Index(reader.FileSystem!);
+        var card = AxisCardIndexer.Index(reader);
 
         var flat = card.Recordings.Single(r => r.Id.Raw == "20250302_180000_0C3D_B8A44F998877");
         flat.LoadChunkMetadata(reader.FileSystem!);
@@ -124,7 +124,7 @@ public class AxisCardTests
 
         // The truncated live-muxed chunk: header Duration is absent or a 0 placeholder.
         var path = @"\20250114\10\20250114_101500_77F0_ACCC8E123456\20250114_10\20250114_101502_0002.mkv";
-        using var stream = fs.OpenFile(path, FileMode.Open, FileAccess.Read);
+        using var stream = fs.OpenFile(fs.Resolve(path)!.Value)!;
         var meta = MkvMetadataReader.Read(stream);
 
         Assert.NotNull(meta);
@@ -152,7 +152,7 @@ public class AxisCardTests
     public void MultiSensorCameraExposesPerSourceRecordings()
     {
         using var reader = CardReader.OpenImage(_fixture.ImagePath);
-        var card = AxisCardIndexer.Index(reader.FileSystem!);
+        var card = AxisCardIndexer.Index(reader);
 
         // The 4-lens camera: one recording per VAPIX source, all under one serial. This is the
         // data the app groups into lens tabs, so SourceToken must parse from the recording.xml.

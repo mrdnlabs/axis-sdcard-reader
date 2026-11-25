@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Input;
 using AxisSdReader.Core.Axis;
+using AxisSdReader.Core.Timeline;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AxisSdReader.App.ViewModels;

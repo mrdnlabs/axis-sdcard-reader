@@ -7,7 +7,15 @@ namespace AxisSdReader.Core.Disk;
 /// <summary>A volume residing on a physical disk, with any mount points (drive letters/folders) it has.</summary>
 /// <param name="VolumeGuidPath">The volume GUID path, e.g. <c>\\?\Volume{...}\</c> (with trailing backslash).</param>
 /// <param name="MountPoints">Mount points such as <c>E:\</c>; empty for unmounted volumes.</param>
-public sealed record VolumeOnDisk(string VolumeGuidPath, IReadOnlyList<string> MountPoints);
+public sealed record VolumeOnDisk(string VolumeGuidPath, IReadOnlyList<string> MountPoints)
+{
+    /// <summary>Where the volume lives: (disk number, byte offset, byte length) per extent.</summary>
+    public IReadOnlyList<(int Disk, long Offset, long Length)> Extents { get; init; } = [];
+
+    /// <summary>Whether any extent of this volume on <paramref name="disk"/> overlaps the byte range.</summary>
+    public bool Overlaps(int disk, long offset, long length) =>
+        Extents.Any(e => e.Disk == disk && e.Offset < offset + length && offset < e.Offset + e.Length);
+}
 
 /// <summary>A physical disk as seen by Windows.</summary>
 public sealed record PhysicalDiskInfo(
@@ -100,6 +108,10 @@ public static class DiskEnumerator
         return BinaryPrimitives.ReadInt32LittleEndian(output.AsSpan(4));
     }
 
+    /// <summary>The volumes Windows currently has on one disk.</summary>
+    public static IReadOnlyList<VolumeOnDisk> GetVolumesOnDisk(int diskNumber) =>
+        GetVolumesByDisk().TryGetValue(diskNumber, out var volumes) ? volumes : [];
+
     private static Dictionary<int, List<VolumeOnDisk>> GetVolumesByDisk()
     {
         var result = new Dictionary<int, List<VolumeOnDisk>>();
@@ -114,14 +126,14 @@ public static class DiskEnumerator
         do
         {
             var volumeGuidPath = name.ToString();
-            var diskNumbers = GetVolumeDiskNumbers(volumeGuidPath);
-            if (diskNumbers.Count == 0)
+            var extents = GetVolumeExtents(volumeGuidPath);
+            if (extents.Count == 0)
             {
                 continue;
             }
 
-            var volume = new VolumeOnDisk(volumeGuidPath, GetMountPoints(volumeGuidPath));
-            foreach (var disk in diskNumbers)
+            var volume = new VolumeOnDisk(volumeGuidPath, GetMountPoints(volumeGuidPath)) { Extents = extents };
+            foreach (var disk in extents.Select(e => e.Disk).Distinct())
             {
                 if (!result.TryGetValue(disk, out var list))
                 {
@@ -136,9 +148,9 @@ public static class DiskEnumerator
         return result;
     }
 
-    private static List<int> GetVolumeDiskNumbers(string volumeGuidPath)
+    private static List<(int Disk, long Offset, long Length)> GetVolumeExtents(string volumeGuidPath)
     {
-        var numbers = new List<int>();
+        var numbers = new List<(int Disk, long Offset, long Length)>();
 
         // CreateFile on a volume requires the path without the trailing backslash.
         using var handle = NativeMethods.CreateFile(volumeGuidPath.TrimEnd('\\'), 0,
@@ -160,7 +172,10 @@ public static class DiskEnumerator
         var count = BinaryPrimitives.ReadInt32LittleEndian(output);
         for (var i = 0; i < count && i < 8; i++)
         {
-            numbers.Add(BinaryPrimitives.ReadInt32LittleEndian(output.AsSpan(8 + i * 24)));
+            var extent = output.AsSpan(8 + i * 24);
+            numbers.Add((BinaryPrimitives.ReadInt32LittleEndian(extent),
+                BinaryPrimitives.ReadInt64LittleEndian(extent[8..]),
+                BinaryPrimitives.ReadInt64LittleEndian(extent[16..])));
         }
 
         return numbers;

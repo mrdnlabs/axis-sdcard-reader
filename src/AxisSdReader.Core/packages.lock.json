@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "LTRData.DiscUtils.Core": {
+        "type": "Direct",
+        "requested": "[1.0.91, )",
+        "resolved": "1.0.91",
+        "contentHash": "CLIlc+K9kP7BJjLIrdd29tWBh53uIqKsHjT/7Oigep1HcoODeJBTti7Cdes+QmIGPHcGCkWnqNeWMkHeGz7OSw==",
+        "dependencies": {
+          "LTRData.DiscUtils.Streams": "1.0.91"
+        }
+      },
+      "LTRData.DiscUtils.Streams": {
+        "type": "Transitive",
+        "resolved": "1.0.91",
+        "contentHash": "bjT45BWrzr9pYEjH9yp9N1PcjdYmY9QggVsjyviXXKCN9fcBxHqnAd+3AoEEUsbR8ZL8Gwa/HAPd05pwLEBN3Q==",
+        "dependencies": {
+          "LTRData.Extensions": "1.0.24"
+        }
+      },
+      "LTRData.Extensions": {
+        "type": "Transitive",
+        "resolved": "1.0.24",
+        "contentHash": "Tmkv948Mxrw7NO4gxNKvB9VDUMzcH1pv4TC07BWSFEsYTpc7H01bIstpclnDXQoKahrgGqrxo8VqE6BmK/9fug=="
+      }
+    },
+    "net10.0/win-x64": {}
+  }
+}

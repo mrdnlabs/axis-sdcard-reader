@@ -628,6 +628,18 @@
                                        Foreground="{DynamicResource T.Text3}" VerticalAlignment="Center" />
                             <TextBlock DockPanel.Dock="Right" Text="{Binding Player.SegCountLabel}" FontSize="11.5"
                                        Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding Player.ClipError}" FontSize="11.5" Margin="0,0,14,0"
+                                       Foreground="{DynamicResource T.RecEvent}" VerticalAlignment="Center">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Player.ClipError}" Value="{x:Null}">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </DockPanel>
                     </Border>
 
@@ -1001,7 +1013,13 @@
                 <Border Background="{DynamicResource T.Panel}" CornerRadius="10" Padding="28,20"
                         BorderBrush="{DynamicResource T.Border}" BorderThickness="1"
                         HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding BusyText}" FontSize="13" Foreground="{DynamicResource T.Text2}" VerticalAlignment="Center" />
+                    <StackPanel>
+                        <TextBlock Text="{Binding BusyText}" FontSize="13" Foreground="{DynamicResource T.Text2}" VerticalAlignment="Center"
+                                   HorizontalAlignment="Center" />
+                        <Button Style="{StaticResource ToolbarButton}" Content="Cancel" Command="{Binding CancelBusyCommand}"
+                                HorizontalAlignment="Center" Margin="0,14,0,0"
+                                Visibility="{Binding CanCancelBusy, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
                 </Border>
             </Border>
         </Grid>
@@ -1015,6 +1033,12 @@
                     <Ellipse Width="7" Height="7" Fill="{DynamicResource T.Trust}" VerticalAlignment="Center" Margin="0,0,6,0" />
                     <TextBlock Text="{Binding MountLabel}" FontSize="11" Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
                 </StackPanel>
+
+                <!-- Install-location warning: an elevated app in a user-writable folder can be tampered with -->
+                <TextBlock DockPanel.Dock="Left" Text="&#xE7BA;  Unsafe install location" FontFamily="Segoe UI, Segoe MDL2 Assets"
+                           FontSize="11" Foreground="{DynamicResource T.RecManual}" VerticalAlignment="Center" Margin="16,0,0,0"
+                           ToolTip="{Binding InstallWarning}" Cursor="Help"
+                           Visibility="{Binding HasInstallWarning, Converter={StaticResource BoolToVis}}" />
 
                 <!-- Theme switcher -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
@@ -1036,6 +1060,36 @@
                         </Button.Template>
                     </Button>
                 </StackPanel>
+
+                <!-- AI agents: opt-in access for the MCP bridge, with an activity dot while an agent is working -->
+                <Button DockPanel.Dock="Right" Command="{Binding ToggleAgentAccessCommand}" Cursor="Hand" Margin="16,0,0,0"
+                        AutomationProperties.Name="AI agents" AutomationProperties.ItemStatus="{Binding AgentLabel}"
+                        ToolTip="{Binding AgentTooltip}" Background="Transparent" BorderThickness="0" Padding="4,0">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Ellipse x:Name="Dot" Width="7" Height="7" Margin="0,0,6,0" VerticalAlignment="Center"
+                                             Fill="{DynamicResource T.Disabled}" />
+                                    <TextBlock x:Name="Label" Text="{Binding AgentLabel}" FontSize="11"
+                                               Foreground="{DynamicResource T.Muted}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <DataTrigger Binding="{Binding AgentAccessEnabled}" Value="True">
+                                    <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource T.Accent}" />
+                                    <Setter TargetName="Label" Property="Foreground" Value="{DynamicResource T.AccentInk}" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding AgentActive}" Value="True">
+                                    <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource T.Trust}" />
+                                </DataTrigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Label" Property="Foreground" Value="{DynamicResource T.Text2}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
 
                 <TextBlock DockPanel.Dock="Right" Text="Index complete" FontSize="11" Foreground="{DynamicResource T.Muted}"
                            VerticalAlignment="Center" Margin="16,0,0,0"
@@ -1187,17 +1241,26 @@
                         <Border.RenderTransform>
                             <ScaleTransform x:Name="PulseScale" />
                         </Border.RenderTransform>
-                        <Border.Triggers>
-                            <EventTrigger RoutedEvent="Border.Loaded">
-                                <BeginStoryboard>
-                                    <Storyboard RepeatBehavior="Forever" Duration="0:0:2.2">
-                                        <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX" From="1" To="1.35" Duration="0:0:2.2" />
-                                        <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY" From="1" To="1.35" Duration="0:0:2.2" />
-                                        <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0.9" To="0" Duration="0:0:2.2" />
-                                    </Storyboard>
-                                </BeginStoryboard>
-                            </EventTrigger>
-                        </Border.Triggers>
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding BootVisible}" Value="True">
+                                        <DataTrigger.EnterActions>
+                                            <BeginStoryboard x:Name="PulseStory">
+                                                <Storyboard RepeatBehavior="Forever" Duration="0:0:2.2">
+                                                    <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleX" From="1" To="1.35" Duration="0:0:2.2" />
+                                                    <DoubleAnimation Storyboard.TargetProperty="RenderTransform.ScaleY" From="1" To="1.35" Duration="0:0:2.2" />
+                                                    <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0.9" To="0" Duration="0:0:2.2" />
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </DataTrigger.EnterActions>
+                                        <DataTrigger.ExitActions>
+                                            <StopStoryboard BeginStoryboardName="PulseStory" />
+                                        </DataTrigger.ExitActions>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                     </Border>
                     <Border CornerRadius="22" Background="{DynamicResource T.Panel}" BorderBrush="{DynamicResource T.Border}" BorderThickness="1">
                         <ContentControl Template="{StaticResource LogoMark}" Width="40" Height="52" />
@@ -1218,15 +1281,24 @@
                             <Path.RenderTransform>
                                 <RotateTransform />
                             </Path.RenderTransform>
-                            <Path.Triggers>
-                                <EventTrigger RoutedEvent="Path.Loaded">
-                                    <BeginStoryboard>
-                                        <Storyboard RepeatBehavior="Forever">
-                                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.Angle" From="0" To="360" Duration="0:0:0.8" />
-                                        </Storyboard>
-                                    </BeginStoryboard>
-                                </EventTrigger>
-                            </Path.Triggers>
+                            <Path.Style>
+                                <Style TargetType="Path">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding BootVisible}" Value="True">
+                                            <DataTrigger.EnterActions>
+                                                <BeginStoryboard x:Name="BootSpinStory">
+                                                    <Storyboard RepeatBehavior="Forever">
+                                                        <DoubleAnimation Storyboard.TargetProperty="RenderTransform.Angle" From="0" To="360" Duration="0:0:0.8" />
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </DataTrigger.EnterActions>
+                                            <DataTrigger.ExitActions>
+                                                <StopStoryboard BeginStoryboardName="BootSpinStory" />
+                                            </DataTrigger.ExitActions>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Path.Style>
                         </Path>
                         <!-- check when done -->
                         <Grid Visibility="{Binding BootDone, Converter={StaticResource BoolToVis}}">

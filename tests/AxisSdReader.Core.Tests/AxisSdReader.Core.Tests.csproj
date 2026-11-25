@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -13,6 +13,8 @@
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
     <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
+    <!-- Only to check the app's own ext4 reader against a general-purpose one; the app itself doesn't use it. -->
+    <PackageReference Include="LTRData.DiscUtils.Ext" Version="1.0.91" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AxisSdReader.Core\AxisSdReader.Core.csproj" />
+    <ProjectReference Include="..\..\src\AxisSdReader.Mcp\AxisSdReader.Mcp.csproj" />
   </ItemGroup>
 
 </Project>

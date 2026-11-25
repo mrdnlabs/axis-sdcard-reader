@@ -21,6 +21,7 @@ public class RecordingIdTests
     [InlineData("20250230_081211_016F_00408C1834FD")] // Feb 30 does not exist
     [InlineData("2025011_093000_1A2B_ACCC8E123456")] // date too short
     [InlineData("notarecording")]
+    [InlineData("20250114_093000_1A2B_ACCC8E123456\n")] // a trailing newline is not part of an ID
     public void RejectsNonRecordingNames(string name)
     {
         Assert.Null(RecordingId.TryParse(name));

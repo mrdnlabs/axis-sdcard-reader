@@ -1,5 +1,5 @@
 using AxisSdReader.Core.Axis;
-using DiscUtils;
+using AxisSdReader.Core.Ext4;
 
 namespace AxisSdReader.Core.Export;
 
@@ -9,8 +9,12 @@ public sealed record ExportProgress(string CurrentFile, int FilesDone, int Files
 /// <summary>Result of exporting one recording.</summary>
 public sealed record ExportResult(string TargetDirectory, int FilesExported, long BytesExported);
 
-/// <summary>Copies recordings off the card to local folders.</summary>
-public static class RecordingExporter
+/// <summary>
+/// Copies recordings off the card to local folders, by path. Not for the elevated app: it opens and deletes files by
+/// name in folders the user controls, which a link could redirect (exports there go through
+/// <see cref="Security.GuardedFolder"/>). Used by tests and tools over trusted folders only.
+/// </summary>
+internal static class RecordingExporter
 {
     private const int BufferSize = 1024 * 1024;
 
@@ -21,7 +25,7 @@ public static class RecordingExporter
     /// are removed).
     /// </summary>
     public static ExportResult Export(
-        DiscFileSystem fileSystem,
+        Ext4Volume fileSystem,
         Recording recording,
         string targetDirectory,
         IProgress<ExportProgress>? progress = null,
@@ -34,9 +38,18 @@ public static class RecordingExporter
         long bytesDone = 0;
         var filesDone = 0;
 
+        var root = Path.GetFullPath(destination) + Path.DirectorySeparatorChar;
         foreach (var chunk in recording.Chunks)
         {
-            var targetPath = Path.Combine(destination, chunk.FileName);
+            // Chunk names come from the card. A crafted name ("C:x.mkv", "..\x.mkv", "a:b.mkv", "COM1.mkv") must
+            // not resolve outside the destination folder, into an alternate data stream, or onto a device.
+            var targetPath = Path.GetFullPath(Path.Combine(destination, chunk.FileName));
+            if (!Security.GuardedFile.IsPlainName(chunk.FileName) ||
+                !targetPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException($"Refusing to export a chunk with an unsafe file name ('{chunk.FileName}').");
+            }
+
             try
             {
                 CopyChunk(fileSystem, chunk, targetPath, ref bytesDone, bytesTotal, filesDone,
@@ -56,7 +69,7 @@ public static class RecordingExporter
     }
 
     private static void CopyChunk(
-        DiscFileSystem fileSystem,
+        Ext4Volume fileSystem,
         RecordingChunk chunk,
         string targetPath,
         ref long bytesDone,
@@ -66,7 +79,7 @@ public static class RecordingExporter
         IProgress<ExportProgress>? progress,
         CancellationToken cancellationToken)
     {
-        using var source = fileSystem.OpenFile(chunk.Path, FileMode.Open, FileAccess.Read);
+        using var source = Recording.OpenChunk(fileSystem, chunk);
         using var target = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None, BufferSize);
 
         var buffer = new byte[BufferSize];

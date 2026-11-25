@@ -1,7 +1,5 @@
 ﻿using System.Buffers.Binary;
 using AxisSdReader.Core.Ext4.Luks;
-using DiscUtils;
-using DiscUtils.Ext;
 using DiscUtils.Streams;
 using RawDisk = DiscUtils.Raw.Disk;
 
@@ -16,27 +14,30 @@ public sealed record CardVolumeInfo(int PartitionIndex, long FirstByte, long Len
 /// <summary>
 /// Opens an SD card - either a raw disk stream or an image file - and locates the ext4
 /// filesystem on it, transparently unlocking a LUKS-encrypted card when a passphrase is supplied.
-/// Strictly read-only: the underlying DiscUtils ext implementation has no write paths, LUKS is
-/// decrypted only on the way out, and callers are expected to supply read-only streams.
+/// The filesystem is read by the app's own reader (<see cref="Ext4Volume"/>), never by a general-purpose library.
+/// Strictly read-only: the reader has no write paths, LUKS is decrypted only on the way out, and callers are expected
+/// to supply read-only streams.
 /// </summary>
 public sealed class CardReader : IDisposable
 {
     private const ushort Ext4SuperblockMagic = 0xEF53;
     private const int SuperblockOffset = 1024;
+    private const int MaxExtAttempts = 4;
     private static readonly byte[] LuksMagic = [0x4C, 0x55, 0x4B, 0x53, 0xBA, 0xBE];
 
     private readonly RawDisk _disk;
     private SparseStream? _partitionStream;
     private IDisposable? _underlying; // for LUKS: the raw partition stream beneath the decrypting stream
 
-    private CardReader(RawDisk disk, CardOpenStatus status, string? failureDetail)
+    private CardReader(RawDisk disk, CardOpenStatus status, string? failureDetail, CardVolumeInfo? volume = null)
     {
         _disk = disk;
         Status = status;
         FailureDetail = failureDetail;
+        Volume = volume; // for an encrypted card: the partition the passphrase is for (so it can be locked meanwhile)
     }
 
-    private CardReader(RawDisk disk, ExtFileSystem fileSystem, SparseStream partitionStream, CardVolumeInfo volume,
+    private CardReader(RawDisk disk, Ext4Volume fileSystem, SparseStream partitionStream, CardVolumeInfo volume,
         IDisposable? underlying = null)
     {
         _disk = disk;
@@ -53,13 +54,24 @@ public sealed class CardReader : IDisposable
     /// <summary>Human-readable detail for non-<see cref="CardOpenStatus.Ok"/> outcomes.</summary>
     public string? FailureDetail { get; }
 
-    /// <summary>The opened ext4 filesystem; non-null exactly when <see cref="Status"/> is <see cref="CardOpenStatus.Ok"/>.</summary>
-    public ExtFileSystem? FileSystem { get; }
+    /// <summary>The opened ext4 filesystem; non-null exactly when <see cref="Status"/> is <see cref="CardOpenStatus.Ok"/>.
+    /// Card I/O: use it where the card may be read (under the card's I/O gate once the card is shared).</summary>
+    public Ext4Volume? FileSystem { get; }
+
+    /// <summary>The filesystem's label, if it has one.</summary>
+    public string? VolumeLabel => FileSystem?.Label;
 
     public CardVolumeInfo? Volume { get; }
 
     /// <summary>True when the opened filesystem was reached by decrypting a LUKS-encrypted card.</summary>
     public bool IsEncrypted { get; }
+
+    /// <summary>The filesystem in <paramref name="volume"/>, if this reader can read it and its top folder.</summary>
+    private static Ext4Volume? OpenVolume(Stream volume) =>
+        Ext4Volume.TryCreate(volume, volume.Length) is { } fs && fs.ReadDirectory(Ext4Volume.RootInode, out _) is not null ? fs : null;
+
+    private const string UnreadableFileSystem =
+        "The card's filesystem uses features this app doesn't read, or its top folder can't be read.";
 
     /// <summary>Opens a card image file (.img/.dd) read-only, unlocking LUKS if <paramref name="passphrase"/> is given.</summary>
     public static CardReader OpenImage(string imagePath, char[]? passphrase = null)
@@ -75,7 +87,23 @@ public sealed class CardReader : IDisposable
     /// </summary>
     public static CardReader Open(Stream diskStream, Ownership ownership, char[]? passphrase = null)
     {
-        var disk = new RawDisk(diskStream, ownership);
+        RawDisk disk;
+        try
+        {
+            disk = new RawDisk(diskStream, ownership);
+        }
+        catch
+        {
+            // RawDisk reads sector 0 on construction; a failing card or truncated image throws here, before
+            // anything owns the stream.
+            if (ownership == Ownership.Dispose)
+            {
+                diskStream.Dispose();
+            }
+
+            throw;
+        }
+
         try
         {
             return Open(disk, passphrase);
@@ -91,25 +119,15 @@ public sealed class CardReader : IDisposable
     {
         var content = disk.Content;
 
-        // A partitionless ("superfloppy") card has the filesystem at byte 0.
-        var candidates = new List<CardVolumeInfo>();
-        if (disk.IsPartitioned && disk.Partitions is { } table)
-        {
-            for (var i = 0; i < table.Count; i++)
-            {
-                var p = table[i];
-                candidates.Add(new CardVolumeInfo(i, p.FirstSector * disk.SectorSize,
-                    (p.LastSector - p.FirstSector + 1) * disk.SectorSize));
-            }
-        }
-        else
-        {
-            candidates.Add(new CardVolumeInfo(-1, 0, disk.Capacity));
-        }
+        // Partitions are found by CardLayout, with hard limits, never by the library's own partition code. A
+        // partitionless ("superfloppy") card has the filesystem at byte 0. SD cards use 512-byte sectors.
+        var candidates = CardLayout.FindPartitions(content, 512, disk.Capacity) ?? [new CardVolumeInfo(-1, 0, disk.Capacity)];
 
         var sawLuks = false;
         var sawLuks1Locked = false; // a supported (LUKS1) volume is present but locked (no passphrase yet)
+        CardVolumeInfo? luksVolume = null; // the first such volume
         var sawExt = false;
+        var extAttempts = 0;
         var havePassphrase = passphrase is { Length: > 0 };
         string? extFailure = null;
         string? luksUnsupported = null;
@@ -125,6 +143,15 @@ public sealed class CardReader : IDisposable
                 if (ReadLuksVersion(content, volume.FirstByte) != 1)
                 {
                     luksUnsupported = "This card uses an encryption format this version can't read (only LUKS1 is supported).";
+                    continue;
+                }
+
+                // Only the first LUKS1 volume is ever unlocked: it is the one the passphrase is asked for (and
+                // locked meanwhile), and one passphrase attempt must cost one bounded key derivation - a card
+                // listing the same header under every partition entry must not multiply it.
+                luksVolume ??= volume;
+                if (!ReferenceEquals(luksVolume, volume))
+                {
                     continue;
                 }
 
@@ -149,17 +176,34 @@ public sealed class CardReader : IDisposable
             }
 
             sawExt = true;
+            if (CardLayout.CheckSuperblock(content, volume.FirstByte, volume.LengthBytes) is { } problem)
+            {
+                extFailure = problem; // never handed to the library: it would size its allocations from these fields
+                continue;
+            }
+
+            // A camera's card has one filesystem; a card offering many that each fail to open only costs time.
+            if (++extAttempts > MaxExtAttempts)
+            {
+                break;
+            }
+
             var partitionStream = new SubStream(content, volume.FirstByte, volume.LengthBytes);
             try
             {
-                var fs = new ExtFileSystem(partitionStream);
-                return new CardReader(disk, fs, partitionStream, volume);
+                if (OpenVolume(partitionStream) is { } fs)
+                {
+                    return new CardReader(disk, fs, partitionStream, volume);
+                }
+
+                extFailure = UnreadableFileSystem;
             }
-            catch (IOException ex)
+            catch (Exception ex) when (ex is not (OutOfMemoryException or StackOverflowException))
             {
-                // DiscUtils throws for incompatible INCOMPAT feature flags and structural corruption.
-                extFailure = ex.Message;
+                extFailure = ex.Message; // a read error on the card itself
             }
+
+            partitionStream.Dispose();
         }
 
         // Prompt for a passphrase when a readable (LUKS1) encrypted volume is present — even if an
@@ -167,7 +211,7 @@ public sealed class CardReader : IDisposable
         if (sawLuks1Locked)
         {
             return new CardReader(disk, CardOpenStatus.EncryptedNeedsPassphrase,
-                "This card is encrypted. Enter the camera's SD card passphrase to unlock it.");
+                "This card is encrypted. Enter the camera's SD card passphrase to unlock it.", luksVolume);
         }
 
         // Only unsupported-encryption volumes present — report it WITHOUT prompting for a passphrase.
@@ -179,7 +223,7 @@ public sealed class CardReader : IDisposable
         if (sawLuks)
         {
             return new CardReader(disk, CardOpenStatus.IncorrectPassphrase,
-                "The passphrase did not unlock the card.");
+                "The passphrase did not unlock the card.", luksVolume);
         }
 
         if (sawExt)
@@ -227,23 +271,36 @@ public sealed class CardReader : IDisposable
                     return null;
                 }
 
-                try
-                {
-                    var fs = new ExtFileSystem(plain);
-                    return new CardReader(disk, fs, plain, volume, luksPartition);
-                }
-                catch (IOException ex)
+                if (CardLayout.CheckSuperblock(plain, 0, plain.Length) is { } problem)
                 {
                     plain.Dispose();
                     luksPartition.Dispose();
-                    luksUnsupported = $"The decrypted filesystem could not be opened: {ex.Message}";
+                    luksUnsupported = $"The card was unlocked, but its filesystem can't be read: {problem}";
                     return null;
                 }
+
+                try
+                {
+                    if (OpenVolume(plain) is { } fs)
+                    {
+                        return new CardReader(disk, fs, plain, volume, luksPartition);
+                    }
+
+                    luksUnsupported = $"The card was unlocked, but its filesystem can't be read: {UnreadableFileSystem}";
+                }
+                catch (Exception ex) when (ex is not (OutOfMemoryException or StackOverflowException))
+                {
+                    luksUnsupported = $"The decrypted filesystem could not be opened: {ex.Message}";
+                }
+
+                plain.Dispose();
+                luksPartition.Dispose();
+                return null;
 
             case LuksUnlockStatus.WrongPassphrase:
                 luksPartition.Dispose();
                 return new CardReader(disk, CardOpenStatus.IncorrectPassphrase,
-                    unlock.Detail ?? "The passphrase is incorrect.");
+                    unlock.Detail ?? "The passphrase is incorrect.", volume);
 
             default: // Unsupported / NotLuks
                 luksPartition.Dispose();
@@ -310,7 +367,6 @@ public sealed class CardReader : IDisposable
 
     public void Dispose()
     {
-        FileSystem?.Dispose();
         _partitionStream?.Dispose();  // for LUKS: the decrypting stream (also disposes its cipher SubStream + AES)
         _partitionStream = null;
         _underlying?.Dispose();        // for LUKS: the raw partition SubStream beneath it

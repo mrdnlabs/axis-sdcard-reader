@@ -11,7 +11,7 @@ namespace AxisSdReader.Core.Axis;
 /// </summary>
 public sealed partial record RecordingId(string Raw, DateTime StartTime, string Suffix, string CameraSerial)
 {
-    [GeneratedRegex(@"^(?<date>\d{8})_(?<time>\d{6})_(?<suffix>[0-9A-Fa-f]{2,8})_(?<serial>[0-9A-Fa-f]{6,16})$")]
+    [GeneratedRegex(@"^(?<date>\d{8})_(?<time>\d{6})_(?<suffix>[0-9A-Fa-f]{2,8})_(?<serial>[0-9A-Fa-f]{6,16})\z")]
     private static partial Regex Pattern();
 
     /// <summary>Parses a recording directory name; returns null when the name is not a recording ID.</summary>

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The MCP bridge: a stdio MCP server an AI agent (Claude Code, Claude Desktop, …) launches. It runs
+       unelevated and either talks to the running app over its named pipe, or opens a card image directly
+       (dash-dash-image). All video decoding for agents happens here, never in the elevated app. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>AxisSdReader.Mcp</AssemblyName>
+    <RootNamespace>AxisSdReader.Mcp</RootNamespace>
+    <AssemblyTitle>Axis SD Card Reader MCP server</AssemblyTitle>
+    <StartupHookSupport>false</StartupHookSupport>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- Released as one exe (see tools/publish.ps1). Set here, not on the publish command line, so it changes only
+         this project's restore graph and the lock files stay valid for every build. -->
+    <PublishSingleFile>true</PublishSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AxisSdReader.Core\AxisSdReader.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="2.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AxisSdReader.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The server icon advertised to MCP clients (the app icon, 64 px). -->
+    <EmbeddedResource Include="Assets\icon-64.png" LogicalName="AxisSdReader.Mcp.icon-64.png" />
+  </ItemGroup>
+
+</Project>

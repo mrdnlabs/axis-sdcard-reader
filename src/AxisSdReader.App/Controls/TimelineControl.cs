@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using AxisSdReader.App.ViewModels;
 using AxisSdReader.Core.Axis;
+using AxisSdReader.Core.Timeline;
 
 namespace AxisSdReader.App.Controls;
 
@@ -42,7 +43,38 @@ public sealed class TimelineControl : FrameworkElement
 
     public static readonly DependencyProperty SegmentsSourceProperty = DependencyProperty.Register(
         nameof(SegmentsSource), typeof(IEnumerable), typeof(TimelineControl),
-        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, OnSegmentsSourceChanged));
+
+    // Redraw when segments are added/replaced (a refined recording), not only when the playhead next moves.
+    private static void OnSegmentsSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var control = (TimelineControl)d;
+        control._drawOrder = null;
+        if (e.OldValue is System.Collections.Specialized.INotifyCollectionChanged oldCollection)
+        {
+            oldCollection.CollectionChanged -= control.OnSegmentsCollectionChanged;
+        }
+
+        if (e.NewValue is System.Collections.Specialized.INotifyCollectionChanged newCollection)
+        {
+            newCollection.CollectionChanged += control.OnSegmentsCollectionChanged;
+        }
+    }
+
+    private void OnSegmentsCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        _drawOrder = null;
+        InvalidateVisual();
+    }
+
+    private const int MaxLabels = 64; // labels on the track at once; more could never be read
+
+    // The recordings as drawing layers (see TimelineLayers), built once per change to the collection rather than
+    // on every repaint — the playhead repaints many times a second, and a card can hold a great many recordings.
+    // Built lazily: a burst of additions costs one build.
+    private TimelineLayers? _drawOrder;
+
+    private TimelineLayers DrawOrder() => _drawOrder ??= TimelineLayers.Build(SegmentsSource);
 
     public static readonly DependencyProperty CenterSecondsProperty = DependencyProperty.Register(
         nameof(CenterSeconds), typeof(double), typeof(TimelineControl),
@@ -124,6 +156,12 @@ public sealed class TimelineControl : FrameworkElement
             return;
         }
 
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            EndDrag(commit: true); // the button was released somewhere we didn't see
+            return;
+        }
+
         var deltaPx = e.GetPosition(this).X - _dragStartX;
         _dragTotalDeltaPx = Math.Max(_dragTotalDeltaPx, Math.Abs(deltaPx));
         var spp = SpanSeconds / Math.Max(1, ActualWidth);
@@ -140,16 +178,45 @@ public sealed class TimelineControl : FrameworkElement
             return;
         }
 
-        _dragging = false;
-        ReleaseMouseCapture();
-
         if (_dragTotalDeltaPx < ClickDragThresholdPx)
         {
+            _dragging = false;
+            ReleaseMouseCapture();
             var x = e.GetPosition(this).X;
             var spp = SpanSeconds / Math.Max(1, ActualWidth);
             ScrubCommitted?.Invoke(CenterSeconds + (x - ActualWidth / 2) * spp);
         }
         else
+        {
+            EndDrag(commit: true);
+        }
+    }
+
+    // Alt-Tab or a dialog mid-drag takes the capture away: end the drag (committing where it got to) so the
+    // timeline doesn't keep scrubbing with no button held and the player doesn't stay in scrub mode.
+    protected override void OnLostMouseCapture(MouseEventArgs e)
+    {
+        base.OnLostMouseCapture(e);
+        if (_dragging)
+        {
+            EndDrag(commit: true);
+        }
+    }
+
+    private void EndDrag(bool commit)
+    {
+        if (!_dragging)
+        {
+            return;
+        }
+
+        _dragging = false;
+        if (IsMouseCaptured)
+        {
+            ReleaseMouseCapture();
+        }
+
+        if (commit)
         {
             ScrubCommitted?.Invoke(CenterSeconds);
         }
@@ -228,7 +295,8 @@ public sealed class TimelineControl : FrameworkElement
         var localMidnight = startLocal.Date;
         var secondsIntoDay = Math.Floor((startLocal - localMidnight).TotalSeconds / step) * step;
         var lastX = double.NaN;
-        for (var boundary = localMidnight.AddSeconds(secondsIntoDay); ; boundary = boundary.AddSeconds(step))
+        var lastBoundary = DateTime.MaxValue.AddDays(-1);
+        for (var boundary = localMidnight.AddSeconds(secondsIntoDay); boundary < lastBoundary; boundary = boundary.AddSeconds(step))
         {
             var t = TimeAxis.ToSeconds(boundary);
             if (t > rightSeconds + step)
@@ -237,7 +305,12 @@ public sealed class TimelineControl : FrameworkElement
             }
 
             var x = Math.Round((t - leftSeconds) / spp) + 0.5;
-            if (x < -60 || x > width + 60)
+            if (x > width + 60)
+            {
+                break; // boundaries only move right from here (also bounds the loop near the end of time)
+            }
+
+            if (x < -60)
             {
                 continue;
             }
@@ -260,33 +333,34 @@ public sealed class TimelineControl : FrameworkElement
         // Recording segments, coloured by kind (continuous=blue, event/motion=red, manual=yellow). Where
         // kinds overlap in time — ACS Edge records continuous + motion in parallel — draw the lowest
         // priority first so the higher-priority colour lands on top (manual > event > scheduled > continuous).
-        var visible = EnumerateSegments()
-            .Where(s => s.EndSeconds >= leftSeconds && s.StartSeconds <= rightSeconds)
-            .OrderBy(s => RecordingTypeClassifier.OverlayPriority(s.Kind))
-            .ToList();
-        foreach (var segment in visible)
-        {
-            var x1 = (segment.StartSeconds - leftSeconds) / spp;
-            var x2 = (segment.EndSeconds - leftSeconds) / spp;
-            var rect = new Rect(x1, trackTop + 8, Math.Max(2, x2 - x1), 34);
-            dc.DrawRoundedRectangle(Theme.RecordingBrush(segment.Kind), null, rect, 4, 4);
-
-            if (rect.Width >= 90)
+        // Each kind's merged spans, at most one shape per pixel run: a repaint - many a second while playing - costs
+        // what the screen can show, however many recordings a card holds.
+        var segmentLabels = 0;
+        DrawOrder().ForEachRun(leftSeconds, rightSeconds,
+            // Clip to just beyond the track: a multi-day recording at a close zoom is millions of pixels wide,
+            // and WPF throws on text wider than ~3.58M px (on every repaint).
+            t => Math.Clamp((t - leftSeconds) / spp, -20, width + 20),
+            (kind, x1, x2, startSeconds, endSeconds) =>
             {
-                var start = TimeAxis.ToDateTime(segment.StartSeconds);
-                var dur = TimeSpan.FromSeconds(segment.EndSeconds - segment.StartSeconds);
-                var durText = dur.TotalHours >= 1 ? $"{(int)dur.TotalHours}h {dur.Minutes}m" : $"{Math.Max(1, (int)dur.TotalMinutes)}m";
-                var labelBrush = segment.Kind == RecordingKind.Manual ? Brushes.Black : Brushes.White;
-                var text = new FormattedText($"{start:HH:mm} · {durText}", CultureInfo.InvariantCulture,
-                    FlowDirection.LeftToRight, MonoFace, 11, labelBrush, dpi)
+                var rect = new Rect(x1, trackTop + 8, Math.Max(2, x2 - x1), 34);
+                dc.DrawRoundedRectangle(Theme.RecordingBrush(kind), null, rect, 4, 4);
+
+                if (rect.Width >= 90 && segmentLabels++ < MaxLabels)
                 {
-                    MaxTextWidth = Math.Max(0, rect.Width - 16),
-                    MaxLineCount = 1,
-                    Trimming = TextTrimming.CharacterEllipsis,
-                };
-                dc.DrawText(text, new Point(Math.Max(rect.X + 8, 8), trackTop + 8 + 17 - text.Height / 2));
-            }
-        }
+                    var start = TimeAxis.ToDateTime(startSeconds);
+                    var dur = SafeTime.FromSeconds(endSeconds - startSeconds);
+                    var durText = dur.TotalHours >= 1 ? $"{(int)dur.TotalHours}h {dur.Minutes}m" : $"{Math.Max(1, (int)dur.TotalMinutes)}m";
+                    var labelBrush = kind == RecordingKind.Manual ? Brushes.Black : Brushes.White;
+                    var text = new FormattedText($"{start:HH:mm} · {durText}", CultureInfo.InvariantCulture,
+                        FlowDirection.LeftToRight, MonoFace, 11, labelBrush, dpi)
+                    {
+                        MaxTextWidth = Math.Max(0, rect.Width - 16),
+                        MaxLineCount = 1,
+                        Trimming = TextTrimming.CharacterEllipsis,
+                    };
+                    dc.DrawText(text, new Point(Math.Max(rect.X + 8, 8), trackTop + 8 + 17 - text.Height / 2));
+                }
+            });
 
         // Export selection: the filled band once BOTH marks are set...
         if (SelInSeconds is { } inSec && SelOutSeconds is { } outSec && outSec > inSec &&
@@ -384,22 +458,6 @@ public sealed class TimelineControl : FrameworkElement
 
         g.Freeze();
         return g;
-    }
-
-    private IEnumerable<TimelineSegment> EnumerateSegments()
-    {
-        if (SegmentsSource is null)
-        {
-            yield break;
-        }
-
-        foreach (var item in SegmentsSource)
-        {
-            if (item is TimelineSegment segment)
-            {
-                yield return segment;
-            }
-        }
     }
 
     private static Rect Inset(Rect r, double by) =>

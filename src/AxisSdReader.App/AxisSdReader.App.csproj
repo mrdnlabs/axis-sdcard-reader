@@ -12,31 +12,75 @@
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageReference Include="LibVLCSharp.WPF" Version="3.10.0" />
-    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" />
+    <PackageReference Include="LibVLCSharp.WPF" Version="3.10.2" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.24" />
   </ItemGroup>
 
-  <!-- Optional bundled FFmpeg (LGPL v3 build). Fetched by tools\publish.ps1 and NOT committed (~104 MB).
-       Copied to the output as ffmpeg\ffmpeg.exe — exactly where FfmpegExporter.FindFfmpeg() looks — and
-       pulled into the single-file exe by IncludeAllContentForSelfExtract, so a standalone build can export
-       with nothing else installed and without ever searching PATH. Conditional: a fresh clone builds fine
-       without it (export then reports FFmpeg as unavailable, as before). -->
+  <!-- Optional bundled FFmpeg (LGPL v3 build). Fetched (and hash-checked) by tools\publish.ps1 and NOT committed
+       (~128 MB). Copied to the output as ffmpeg\ffmpeg.exe — exactly where FfmpegExporter.FindFfmpeg() looks — so
+       a package can export with nothing else installed and without ever searching PATH. Conditional: a fresh
+       clone builds fine without it (export then reports FFmpeg as unavailable). -->
   <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\ffmpeg\ffmpeg.exe')">
     <Content Include="ffmpeg\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <PlatformTarget>x64</PlatformTarget>
-    <!-- Build with -p:DevManifest=true for an asInvoker build (image mode only, no UAC). -->
+    <!-- asInvoker: administrator rights come only through the launcher (src\AxisSdReader.Launcher), which starts
+         this exe with a clean environment. Started directly, the app hands over to it, or opens card images
+         without rights. -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationManifest Condition="'$(DevManifest)' == 'true'">app.dev.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\AxisSDCardReader.ico</ApplicationIcon>
     <AssemblyTitle>Axis SD Card Reader</AssemblyTitle>
+    <!-- The app runs elevated with the user's environment. DOTNET_STARTUP_HOOKS (settable by any program
+         running as the user, via HKCU\Environment) would otherwise load a DLL into it before Main. -->
+    <StartupHookSupport>false</StartupHookSupport>
+    <!-- No BinaryFormatter anywhere in the process (WPF can reach it through some clipboard and resource paths). -->
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
   </PropertyGroup>
+
+  <!-- libVLC: ship only what playing camera MKV chunks from memory needs. The app hands libVLC each chunk as a
+       stream (the imem access) and forces the Matroska demuxer, so everything that reaches the network, captures
+       a screen, camera or microphone, reads discs, writes files, streams out, discovers devices, runs Lua (VLC
+       runs scripts from the user's writable %APPDATA%\vlc folder), or encodes (x264, GPL) is left out: none of
+       it is used, and all of it would be attack surface inside this elevated process. An allow-list by folder, so
+       a new plugin category in a later libVLC is excluded until someone decides otherwise. x64 only. -->
+  <PropertyGroup>
+    <VlcWindowsX86Enabled>false</VlcWindowsX86Enabled>
+    <VlcWindowsArm64Enabled>false</VlcWindowsArm64Enabled>
+  </PropertyGroup>
+  <ItemGroup>
+    <VlcWindowsX64IncludeFiles Include="libvlc.dll;libvlccore.dll" />
+    <!-- libimem_plugin is VLC's in-memory stream input (access/imem-access.c), which LibVLCSharp's stream media
+         uses; despite its name, libaccess_imem_plugin is the older ES-callback module (access/imem.c), not needed. -->
+    <VlcWindowsX64IncludeFiles Include="plugins\access\libimem_plugin.dll" />
+    <VlcWindowsX64IncludeFiles Include="plugins\demux\libmkv_plugin.dll" />
+    <VlcWindowsX64IncludeFiles Include="plugins\audio_filter\%2A;plugins\audio_mixer\%2A;plugins\audio_output\%2A" />
+    <!-- Decoders and packetizers by name, for what Axis cameras record: H.264, H.265, AV1, MJPEG, MPEG-4, and
+         AAC / G.711 / G.726 / Opus / MP3 / PCM audio (avcodec covers most; the rest are its usual companions). -->
+    <VlcWindowsX64IncludeFiles Include="plugins\codec\libavcodec_plugin.dll;plugins\codec\libdav1d_plugin.dll;plugins\codec\libd3d11va_plugin.dll;plugins\codec\libdxva2_plugin.dll" />
+    <VlcWindowsX64IncludeFiles Include="plugins\codec\libaraw_plugin.dll;plugins\codec\liblpcm_plugin.dll;plugins\codec\libadpcm_plugin.dll;plugins\codec\libg711_plugin.dll;plugins\codec\libopus_plugin.dll;plugins\codec\libmpg123_plugin.dll;plugins\codec\librawvideo_plugin.dll;plugins\codec\libddummy_plugin.dll" />
+    <VlcWindowsX64IncludeFiles Include="plugins\packetizer\libpacketizer_copy_plugin.dll;plugins\packetizer\libpacketizer_h264_plugin.dll;plugins\packetizer\libpacketizer_hevc_plugin.dll;plugins\packetizer\libpacketizer_av1_plugin.dll" />
+    <VlcWindowsX64IncludeFiles Include="plugins\packetizer\libpacketizer_mpeg4audio_plugin.dll;plugins\packetizer\libpacketizer_mpegaudio_plugin.dll;plugins\packetizer\libpacketizer_mpeg4video_plugin.dll;plugins\packetizer\libpacketizer_mpegvideo_plugin.dll" />
+    <VlcWindowsX64IncludeFiles Include="plugins\stream_filter\%2A" />
+    <VlcWindowsX64IncludeFiles Include="plugins\d3d11\%2A;plugins\d3d9\%2A;plugins\video_chroma\%2A;plugins\video_filter\%2A;plugins\video_output\%2A" />
+    <VlcWindowsX64IncludeFiles Include="plugins\text_renderer\libtdummy_plugin.dll" />
+    <!-- Within the folders still taken whole: modules that write files or talk to the network. -->
+    <VlcWindowsX64ExcludeFiles Include="plugins\stream_filter\librecord_plugin.dll;plugins\stream_filter\libhds_plugin.dll;plugins\stream_filter\libadf_plugin.dll;plugins\stream_filter\libaribcam_plugin.dll" />
+    <VlcWindowsX64ExcludeFiles Include="plugins\video_filter\libscene_plugin.dll;plugins\video_output\libflaschen_plugin.dll;plugins\video_output\libyuv_plugin.dll;plugins\video_output\libcaca_plugin.dll;plugins\audio_output\libafile_plugin.dll" />
+  </ItemGroup>
+
+  <!-- No createdump.exe in the package: the runtime starts it to write a memory dump - which would hold decrypted
+       footage and the card's key - when DOTNET_DbgEnableMiniDump is set, to wherever DOTNET_DbgMiniDumpName says. -->
+  <Target Name="DropCreateDump" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Filename)%(Extension)' == 'createdump.exe'" />
+    </ItemGroup>
+  </Target>
 
 </Project>

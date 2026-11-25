@@ -28,6 +28,7 @@ internal static class AntiForensic
             result[k] = (byte)(buffer[k] ^ last[k]);
         }
 
+        CryptographicOperations.ZeroMemory(buffer); // master key XOR last stripe: key material
         return result;
     }
 
@@ -50,6 +51,10 @@ internal static class AntiForensic
             offset += chunk;
             index++;
         }
+
+        // Both held key material: leave none of it on the stack.
+        CryptographicOperations.ZeroMemory(input);
+        CryptographicOperations.ZeroMemory(digest);
     }
 
     private static void Hash(string hashSpec, ReadOnlySpan<byte> data, Span<byte> destination)

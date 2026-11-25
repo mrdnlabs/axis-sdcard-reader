@@ -45,21 +45,13 @@ public static class AxisCardDetector
                 return new AxisCardProbeResult(diskNumber, IsExt4: false, null, false);
             }
 
-            var hasContent = fs.FileExists(@"\index.db");
-            if (!hasContent)
-            {
-                foreach (var dir in fs.GetDirectories(@"\"))
-                {
-                    var name = System.IO.Path.GetFileName(dir.TrimEnd('\\'));
-                    if (RecordingId.TryParse(name) is not null || DateDir.IsMatch(name))
-                    {
-                        hasContent = true;
-                        break;
-                    }
-                }
-            }
+            // The top folder is read by the app's own reader.
+            var root = fs.ReadDirectory(Ext4Volume.RootInode, out _) ?? [];
+            var hasContent = root.Any(e =>
+                (e.Kind == CardEntryKind.File && e.Name.Equals("index.db", StringComparison.Ordinal)) ||
+                (e.Kind == CardEntryKind.Directory && (RecordingId.TryParse(e.Name) is not null || DateDir.IsMatch(e.Name))));
 
-            return new AxisCardProbeResult(diskNumber, IsExt4: true, fs.VolumeLabel, hasContent);
+            return new AxisCardProbeResult(diskNumber, IsExt4: true, fs.Label, hasContent);
         }
         catch
         {
