@@ -12,7 +12,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
-    <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.85" />
     <!-- Only to check the app's own ext4 reader against a general-purpose one; the app itself doesn't use it. -->
     <PackageReference Include="LTRData.DiscUtils.Ext" Version="1.0.91" />
   </ItemGroup>
