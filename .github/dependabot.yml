@@ -1,4 +1,7 @@
 ﻿# Keep dependencies and pinned actions current; security updates are raised as pull requests.
+# Version updates wait a week after a release (cooldown) - time for a bad or compromised release to be caught
+# upstream - and the test tooling comes as one pull request instead of one per package. Neither applies to
+# security updates, which are raised straight away.
 version: 2
 updates:
   - package-ecosystem: nuget
@@ -6,7 +9,18 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    groups:
+      test-tools:
+        patterns:
+          - "xunit*"
+          - "Xunit.*"
+          - "Microsoft.NET.Test.Sdk"
+          - "coverlet*"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
